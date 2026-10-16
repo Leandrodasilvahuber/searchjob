@@ -1,0 +1,216 @@
+package com.huber.searchjob.engine;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.huber.searchjob.db.CandidaturaRepo;
+import com.huber.searchjob.db.Cv;
+import com.huber.searchjob.db.CvRepo;
+import com.huber.searchjob.db.KvRepo;
+import java.time.LocalDate;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import org.springframework.stereotype.Service;
+
+/** Executa a sessão de busca/candidatura em uma thread, vaga por vaga. */
+@Service
+public class Orquestrador {
+    private final KvRepo kv;
+    private final CandidaturaRepo candidaturas;
+    private final CvRepo cvs;
+    private final FiltroVaga filtro;
+    private final EscolhaCv escolhaCv;
+    private final SituacaoService situacoes;
+    private final ZaiClient zai;
+    private final CvContexto cvContexto;
+    private final Aviso aviso;
+
+    private volatile boolean rodando;
+    private volatile String mensagem = "parado";
+    private volatile int processadas, enviadas, puladas, erros;
+    private final Deque<String> log = new ArrayDeque<>();
+    private Thread thread;
+
+    public Orquestrador(KvRepo kv, CandidaturaRepo candidaturas, CvRepo cvs, FiltroVaga filtro, EscolhaCv escolhaCv,
+                        SituacaoService situacoes, ZaiClient zai, CvContexto cvContexto, Aviso aviso) {
+        this.kv = kv;
+        this.candidaturas = candidaturas;
+        this.cvs = cvs;
+        this.filtro = filtro;
+        this.escolhaCv = escolhaCv;
+        this.situacoes = situacoes;
+        this.zai = zai;
+        this.cvContexto = cvContexto;
+        this.aviso = aviso;
+    }
+
+    public record Estado(boolean rodando, String mensagem, int processadas, int enviadas, int puladas, int erros,
+                         List<String> log) {}
+
+    public synchronized Estado estado() {
+        return new Estado(rodando, mensagem, processadas, enviadas, puladas, erros, new ArrayList<>(log));
+    }
+
+    public synchronized void iniciar() {
+        if (rodando) return;
+        rodando = true;
+        processadas = enviadas = puladas = erros = 0;
+        log.clear();
+        thread = new Thread(this::executar, "searchjob-sessao");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    public synchronized void parar() {
+        rodando = false;
+        mensagem = "parando…";
+        if (thread != null) thread.interrupt();
+    }
+
+    private void registrar(String linha) {
+        synchronized (this) {
+            log.addFirst(java.time.LocalTime.now().withNano(0) + " " + linha);
+            while (log.size() > 80) log.removeLast();
+            mensagem = linha;
+        }
+    }
+
+    private void executar() {
+        NavegadorFirefox navegador = new NavegadorFirefox();
+        List<PortalDriver> drivers = new ArrayList<>();
+        try {
+            for (String p : kv.get(KvRepo.CONFIG, "portais", "gupy").split(",")) {
+                if (p.trim().equalsIgnoreCase("gupy")) drivers.add(new GupyDriver(navegador, situacoes));
+            }
+            boolean zaiAvalia = "zai".equals(kv.get(KvRepo.CONFIG, "modo", "codigo"));
+            boolean dryRun = Boolean.parseBoolean(kv.get(KvRepo.CONFIG, "dry_run", "true"));
+            int max = Integer.parseInt(kv.get(KvRepo.CONFIG, "max_vagas", "30"));
+            if (zaiAvalia && !zai.configurado()) {
+                registrar("modo z.ai sem chave configurada — voltando ao modo código");
+                zaiAvalia = false;
+            }
+            registrar("sessão iniciada · modo " + (zaiAvalia ? "z.ai avalia" : "código") + (dryRun ? " · dry-run" : ""));
+            Set<String> vistas = new HashSet<>();
+            for (PortalDriver driver : drivers) {
+                for (String termo : kv.get(KvRepo.PREF, "termos", "").split(",")) {
+                    if (!rodando || termo.isBlank()) continue;
+                    registrar(driver.nome() + ": buscando \"" + termo.trim() + "\"");
+                    List<Vaga> vagas;
+                    try {
+                        vagas = driver.buscar(termo.trim(), max);
+                    } catch (Exception e) {
+                        registrar("erro na busca: " + e.getMessage());
+                        continue;
+                    }
+                    for (Vaga v : vagas) {
+                        if (!rodando) break;
+                        if (!vistas.add(v.url()) || candidaturas.jaProcessada(v.url())) continue;
+                        processar(driver, v, zaiAvalia, dryRun);
+                    }
+                }
+            }
+            registrar("✨ terminei — " + processadas + " processadas · " + enviadas + " enviadas · "
+                    + puladas + " puladas · " + erros + " erros");
+        } catch (Exception e) {
+            registrar("sessão interrompida: " + e.getMessage());
+        } finally {
+            drivers.forEach(PortalDriver::fechar);
+            navegador.fechar();
+            rodando = false;
+        }
+    }
+
+    private void processar(PortalDriver driver, Vaga v, boolean zaiAvalia, boolean dryRun) {
+        processadas++;
+        String rotulo = v.empresa() + " — " + v.cargo();
+        Optional<String> descarte = filtro.motivoDescarte(v, LocalDate.now());
+        if (descarte.isPresent()) {
+            candidaturas.inserir(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", descarte.get(), null);
+            puladas++;
+            registrar("pulada: " + rotulo + " (" + descarte.get() + ")");
+            return;
+        }
+        Optional<Cv> cv = escolhaCv.escolher(v);
+        if (zaiAvalia) {
+            try {
+                JsonNode r = zai.conversarJson(AVALIA_SYSTEM, avaliaPedido(v));
+                if (!r.path("candidatar").asBoolean(false)) {
+                    String motivo = "z.ai: " + r.path("motivo").asText("fora do perfil");
+                    candidaturas.inserir(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", motivo, null);
+                    puladas++;
+                    registrar("pulada: " + rotulo + " (" + motivo + ")");
+                    return;
+                }
+                String nomeCv = r.path("cv").asText("");
+                if (!nomeCv.isBlank()) {
+                    Optional<Cv> atual = cv;
+                    cv = cvs.todos().stream().filter(c -> c.nome().equalsIgnoreCase(nomeCv)).findFirst().or(() -> atual);
+                }
+            } catch (RuntimeException e) {
+                registrar("z.ai indisponível na avaliação, seguindo pelas regras: " + e.getMessage());
+            }
+        }
+        if (cv.isEmpty()) {
+            registrar("sem CV cadastrado — pare e importe os CVs");
+            rodando = false;
+            return;
+        }
+        long id = candidaturas.inserir(v.portal(), v.empresa(), v.cargo(), v.url(), cv.get().nome(), "pendente", "em andamento", null);
+        registrar("candidatando: " + rotulo + " · CV " + cv.get().nome());
+        PortalDriver.Desfecho d = null;
+        for (int tentativa = 1; tentativa <= 2 && rodando; tentativa++) {
+            try {
+                d = driver.candidatar(v, cv.get(), dryRun, () -> rodando);
+            } catch (Exception e) {
+                d = new PortalDriver.Desfecho(PortalDriver.Status.ERRO, e.getMessage());
+            }
+            if (d.status() != PortalDriver.Status.ERRO) break;
+        }
+        if (d == null) {
+            candidaturas.atualizarStatus(id, "pendente", "sessão parada");
+            return;
+        }
+        switch (d.status()) {
+            case ENVIADA -> {
+                candidaturas.atualizarStatus(id, "enviada", d.motivo());
+                enviadas++;
+                aviso.enviada();
+                registrar("enviada: " + rotulo);
+            }
+            case PRONTA_DRY_RUN -> {
+                candidaturas.atualizarStatus(id, "pendente", d.motivo());
+                registrar("pronta (dry-run): " + rotulo);
+            }
+            case PRECISA_USUARIO -> {
+                candidaturas.atualizarStatus(id, "aguardando_usuario", d.motivo());
+                aviso.chamarUsuario();
+                registrar("preciso de você: " + rotulo + " (" + d.motivo() + ")");
+                if (d.motivo().contains("login") || d.motivo().toLowerCase().contains("captcha")) rodando = false;
+            }
+            default -> {
+                candidaturas.atualizarStatus(id, "erro", d.motivo());
+                erros++;
+                registrar("erro: " + rotulo + " (" + d.motivo() + ")");
+            }
+        }
+    }
+
+    private static final String AVALIA_SYSTEM = """
+            Você avalia se uma vaga combina com o candidato. Responda SOMENTE com JSON:
+            {"candidatar": true|false, "cv": "nome exato de um dos CVs ou vazio", "motivo": "curto"}.
+            Pule vagas que exigem inglês falado/reuniões em inglês, stack principal fora do perfil, estágio ou fora do Brasil.
+            """;
+
+    private String avaliaPedido(Vaga v) {
+        String descr = v.descricao() == null ? "" : v.descricao();
+        return "VAGA: " + v.empresa() + " — " + v.cargo() + " (" + v.local() + ", " + v.modalidade() + ")\n"
+                + (descr.length() > 4000 ? descr.substring(0, 4000) : descr)
+                + "\n\nPREFERÊNCIAS: " + kv.todos(KvRepo.PREF)
+                + "\nCVs DISPONÍVEIS: " + Arrays.toString(cvs.todos().stream().map(Cv::nome).toArray())
+                + "\n\nCURRÍCULO:\n" + cvContexto.textoCvs();
+    }
+}

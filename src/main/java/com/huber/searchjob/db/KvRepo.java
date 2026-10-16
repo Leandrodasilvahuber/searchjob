@@ -1,0 +1,47 @@
+package com.huber.searchjob.db;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Repository;
+
+/** Acesso às tabelas chave/valor: dado_fixo, preferencia e config. */
+@Repository
+public class KvRepo {
+    public static final String DADO = "dado_fixo", PREF = "preferencia", CONFIG = "config";
+    private static final Set<String> TABELAS = Set.of(DADO, PREF, CONFIG);
+    private final JdbcClient jdbc;
+
+    public KvRepo(JdbcClient jdbc) {
+        this.jdbc = jdbc;
+    }
+
+    private static String t(String tabela) {
+        if (!TABELAS.contains(tabela)) throw new IllegalArgumentException(tabela);
+        return tabela;
+    }
+
+    public Map<String, String> todos(String tabela) {
+        Map<String, String> out = new LinkedHashMap<>();
+        jdbc.sql("SELECT chave, valor FROM " + t(tabela) + " ORDER BY chave")
+                .query((rs, i) -> out.put(rs.getString(1), rs.getString(2)))
+                .list();
+        return out;
+    }
+
+    public String get(String tabela, String chave, String padrao) {
+        return jdbc.sql("SELECT valor FROM " + t(tabela) + " WHERE chave = ?")
+                .param(chave).query(String.class).optional().orElse(padrao);
+    }
+
+    public void put(String tabela, String chave, String valor) {
+        jdbc.sql("INSERT INTO " + t(tabela) + "(chave, valor) VALUES (?, ?) "
+                        + "ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor")
+                .param(chave).param(valor).update();
+    }
+
+    public void remover(String tabela, String chave) {
+        jdbc.sql("DELETE FROM " + t(tabela) + " WHERE chave = ?").param(chave).update();
+    }
+}

@@ -1,0 +1,15 @@
+server:
+  port: 8787
+spring:
+  datasource:
+    url: jdbc:sqlite:data/searchjob.db
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+searchjob:
+  # pasta com os CVs em PDF e o respostas_candidaturas.md (usada pelo importador)
+  pasta-origem: "/home/huber/Área de Trabalho/buscar trabalho automatico"

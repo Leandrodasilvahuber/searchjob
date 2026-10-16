@@ -1,0 +1,47 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="pt-BR">
+<head th:fragment="head(titulo)">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title th:text="${titulo} + ' · SearchJob'">SearchJob</title>
+  <style>
+    :root { --bg:#f6f7f9; --card:#fff; --fg:#1b1f24; --mut:#667085; --bd:#d9dde3; --ac:#2563eb; --ok:#15803d; --warn:#b45309; --bad:#b91c1c; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#111418; --card:#1a1f26; --fg:#e6e8eb; --mut:#98a2b3; --bd:#2d343d; --ac:#6ea0ff; --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; } }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, sans-serif; }
+    nav { display:flex; flex-wrap:wrap; gap:4px; padding:10px 16px; background:var(--card); border-bottom:1px solid var(--bd); position:sticky; top:0; }
+    nav a { color:var(--mut); text-decoration:none; padding:6px 12px; border-radius:6px; }
+    nav a.on { background:var(--ac); color:#fff; }
+    nav .badge { background:var(--bad); color:#fff; border-radius:10px; padding:0 7px; font-size:12px; margin-left:4px; }
+    main { max-width:1100px; margin:0 auto; padding:16px; }
+    h1 { font-size:22px; margin:8px 0 16px; }
+    .card { background:var(--card); border:1px solid var(--bd); border-radius:10px; padding:14px; margin-bottom:14px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { text-align:left; padding:8px; border-bottom:1px solid var(--bd); vertical-align:top; word-break:break-word; }
+    th { color:var(--mut); font-weight:600; font-size:13px; }
+    input, textarea, select, button { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--bd); border-radius:6px; padding:6px 10px; }
+    textarea { width:100%; min-height:70px; } input[type=text], input[type=password] { width:100%; }
+    button { cursor:pointer; background:var(--ac); color:#fff; border-color:var(--ac); }
+    button.sec { background:transparent; color:var(--fg); border-color:var(--bd); }
+    button.del { background:transparent; color:var(--bad); border-color:var(--bad); }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .tag { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; border:1px solid var(--bd); }
+    .enviada,.ativa { color:var(--ok); } .pulada,.inativa { color:var(--mut); } .erro { color:var(--bad); }
+    .pendente,.pendente_confirmacao,.aguardando_usuario { color:var(--warn); }
+    .mut { color:var(--mut); } pre { white-space:pre-wrap; font-size:13px; max-height:220px; overflow:auto; }
+    .chamando { border-color:var(--warn); background:color-mix(in srgb, var(--warn) 12%, var(--card)); }
+  </style>
+</head>
+<body>
+<nav th:fragment="menu(pagina)">
+  <a th:href="@{/}" th:classappend="${pagina=='painel'} ? 'on'">Painel</a>
+  <a th:href="@{/pendencias}" th:classappend="${pagina=='pendencias'} ? 'on'">Pendências</a>
+  <a th:href="@{/historico}" th:classappend="${pagina=='historico'} ? 'on'">Histórico</a>
+  <a th:href="@{/situacoes}" th:classappend="${pagina=='situacoes'} ? 'on'">Situações</a>
+  <a th:href="@{/cvs}" th:classappend="${pagina=='cvs'} ? 'on'">CVs</a>
+  <a th:href="@{/kv/dado_fixo}" th:classappend="${pagina=='dado_fixo'} ? 'on'">Dados fixos</a>
+  <a th:href="@{/kv/preferencia}" th:classappend="${pagina=='preferencia'} ? 'on'">Preferências</a>
+  <a th:href="@{/kv/config}" th:classappend="${pagina=='config'} ? 'on'">Configuração</a>
+</nav>
+</body>
+</html>

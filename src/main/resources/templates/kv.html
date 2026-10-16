@@ -1,0 +1,34 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="pt-BR">
+<head th:replace="~{layout :: head(${tabela})}"></head>
+<body>
+<nav th:replace="~{layout :: menu(${pagina})}"></nav>
+<main>
+  <h1 th:text="${tabela=='dado_fixo'} ? 'Dados fixos' : (${tabela=='preferencia'} ? 'Preferências' : 'Configuração')"></h1>
+  <p class="mut" th:if="${tabela=='config'}">modo: codigo | zai · portais: gupy · dry_run: true/false · zai_chave: sua chave da z.ai.</p>
+  <div class="card">
+    <table>
+      <tr><th style="width:28%">Chave</th><th>Valor</th><th style="width:150px"></th></tr>
+      <tr th:each="e : ${itens}">
+        <form th:action="@{/kv/{t}(t=${tabela})}" method="post">
+          <td><b th:text="${e.key}"></b><input type="hidden" name="chave" th:value="${e.key}"></td>
+          <td><input th:type="${segredos.contains(e.key)} ? 'password' : 'text'" name="valor" th:value="${e.value}"></td>
+          <td class="row">
+            <button>Salvar</button>
+            <button class="del" formaction="#" th:formaction="@{/kv/{t}/excluir(t=${tabela})}">Excluir</button>
+          </td>
+        </form>
+      </tr>
+    </table>
+  </div>
+  <div class="card">
+    <b>Novo item</b>
+    <form th:action="@{/kv/{t}(t=${tabela})}" method="post" class="row">
+      <input type="text" name="chave" placeholder="chave" style="width:30%">
+      <input type="text" name="valor" placeholder="valor" style="flex:1">
+      <button>Adicionar</button>
+    </form>
+  </div>
+</main>
+</body>
+</html>

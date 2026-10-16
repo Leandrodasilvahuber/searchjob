@@ -1,0 +1,53 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="pt-BR">
+<head th:replace="~{layout :: head('Painel')}"></head>
+<body>
+<nav th:replace="~{layout :: menu(${pagina})}"></nav>
+<main>
+  <h1>Painel</h1>
+  <div id="chamando" class="card chamando" th:if="${pendencias > 0}">
+    🔔 Preciso de você: <b th:text="${pendencias}">1</b> pendência(s) —
+    <a th:href="@{/pendencias}">abrir pendências</a>
+  </div>
+  <div class="card">
+    <div class="row">
+      <form th:action="@{/iniciar}" method="post" th:unless="${estado.rodando}"><button>▶ Iniciar busca</button></form>
+      <form th:action="@{/parar}" method="post" th:if="${estado.rodando}"><button class="del">■ Parar</button></form>
+      <span class="tag" id="estado" th:text="${estado.rodando} ? 'rodando' : 'parado'">parado</span>
+      <span class="mut" id="msg" th:text="${estado.mensagem}"></span>
+    </div>
+    <p class="mut" id="contadores"
+       th:text="${estado.processadas} + ' processadas · ' + ${estado.enviadas} + ' enviadas · ' + ${estado.puladas} + ' puladas · ' + ${estado.erros} + ' erros'"></p>
+  </div>
+  <div class="card">
+    <b>Modo de avaliação</b>
+    <form th:action="@{/modo}" method="post" class="row">
+      <label><input type="radio" name="modo" value="codigo" th:checked="${modo=='codigo'}" onchange="this.form.submit()"> Por código (regras + banco; z.ai só em situação nova)</label>
+      <label><input type="radio" name="modo" value="zai" th:checked="${modo=='zai'}" onchange="this.form.submit()"> z.ai avalia a adequação da vaga</label>
+    </form>
+    <form th:action="@{/dryrun}" method="post" class="row" style="margin-top:8px">
+      <label><input type="checkbox" th:checked="${dryRun}" onchange="document.getElementById('dr').value=this.checked; this.form.submit()"> Dry-run (preenche mas não envia)</label>
+      <input type="hidden" name="ligado" id="dr" th:value="${dryRun}">
+    </form>
+  </div>
+  <div class="card"><b>Log</b>
+    <pre id="log" th:text="${#strings.listJoin(estado.log, '&#10;')}"></pre>
+  </div>
+</main>
+<script th:inline="javascript">
+  let antes = /*[[${pendencias}]]*/ 0;
+  setInterval(async () => {
+    try {
+      const r = await (await fetch('/api/estado')).json();
+      const e = r.estado;
+      document.getElementById('estado').textContent = e.rodando ? 'rodando' : 'parado';
+      document.getElementById('msg').textContent = e.mensagem;
+      document.getElementById('contadores').textContent =
+        `${e.processadas} processadas · ${e.enviadas} enviadas · ${e.puladas} puladas · ${e.erros} erros`;
+      document.getElementById('log').textContent = e.log.join('\n');
+      if (r.pendencias !== antes) { antes = r.pendencias; if (antes > 0) location.reload(); }
+    } catch (_) {}
+  }, 3000);
+</script>
+</body>
+</html>

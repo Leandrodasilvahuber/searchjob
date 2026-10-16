@@ -1,0 +1,32 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="pt-BR">
+<head th:replace="~{layout :: head('Pendências')}"></head>
+<body>
+<nav th:replace="~{layout :: menu(${pagina})}"></nav>
+<main>
+  <h1>Pendências</h1>
+  <h2>A z.ai respondeu — confirme ou corrija</h2>
+  <p class="mut" th:if="${confirmar.isEmpty()}">Nada para confirmar.</p>
+  <div class="card chamando" th:each="s : ${confirmar}">
+    <b th:text="${s.padraoPergunta}"></b>
+    <p class="mut" th:if="${s.contexto != null}" th:text="${#strings.abbreviate(s.contexto, 160)}"></p>
+    <form th:action="@{/pendencias/{id}/confirmar(id=${s.id})}" method="post">
+      <textarea name="resposta" th:text="${s.promptOuResposta}"></textarea>
+      <button>Confirmar e salvar como regra</button>
+      <button class="del" th:formaction="@{/situacoes/{id}/excluir(id=${s.id})}">Descartar</button>
+    </form>
+  </div>
+  <h2>A z.ai não resolveu — me diga o que responder</h2>
+  <p class="mut" th:if="${ajuda.isEmpty()}">Nada aguardando.</p>
+  <div class="card chamando" th:each="s : ${ajuda}">
+    <b th:text="${s.padraoPergunta}"></b>
+    <p class="mut" th:if="${s.contexto != null}" th:text="${#strings.abbreviate(s.contexto, 160)}"></p>
+    <form th:action="@{/pendencias/{id}/responder(id=${s.id})}" method="post">
+      <textarea name="resposta" placeholder="O que responder nessa situação? Vira regra para as próximas vezes."></textarea>
+      <button>Salvar resposta</button>
+      <button class="del" th:formaction="@{/situacoes/{id}/excluir(id=${s.id})}">Descartar</button>
+    </form>
+  </div>
+</main>
+</body>
+</html>

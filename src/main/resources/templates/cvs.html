@@ -1,0 +1,23 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="pt-BR">
+<head th:replace="~{layout :: head('CVs')}"></head>
+<body>
+<nav th:replace="~{layout :: menu(${pagina})}"></nav>
+<main>
+  <h1>Currículos</h1>
+  <p class="mut">As palavras-chave (separadas por vírgula) decidem qual CV usar; em empate vale o NodeJS. O texto extraído é o que a z.ai lê.</p>
+  <p class="mut" th:if="${itens.isEmpty()}">Nenhum CV importado. Confira <code>searchjob.pasta-origem</code> no application.yml.</p>
+  <div class="card" th:each="c : ${itens}">
+    <form th:action="@{/cvs/{id}/salvar(id=${c.id})}" method="post">
+      <b th:text="${c.nome}"></b> <span class="mut" th:text="${c.arquivoPdf}"></span>
+      <label class="mut">Palavras-chave da stack</label>
+      <input type="text" name="regras" th:value="${c.regrasStack}">
+      <label class="mut">Texto extraído</label>
+      <textarea name="texto" style="min-height:140px" th:text="${c.textoExtraido}"></textarea>
+      <button>Salvar</button>
+      <button class="del" th:formaction="@{/cvs/{id}/excluir(id=${c.id})}" onclick="return confirm('Excluir CV?')">Excluir</button>
+    </form>
+  </div>
+</main>
+</body>
+</html>

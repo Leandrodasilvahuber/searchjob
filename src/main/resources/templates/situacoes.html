@@ -1,0 +1,40 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="pt-BR">
+<head th:replace="~{layout :: head('Situações')}"></head>
+<body>
+<nav th:replace="~{layout :: menu(${pagina})}"></nav>
+<main>
+  <h1>Situações e perguntas aprendidas</h1>
+  <p class="mut">Cada linha é uma regra: quando a pergunta (ou uma muito parecida) aparece, a resposta é aplicada sem chamar a z.ai.</p>
+  <div class="card">
+    <b>Nova situação</b>
+    <form th:action="@{/situacoes/salvar}" method="post">
+      <input type="text" name="pergunta" placeholder="Pergunta / situação como aparece no formulário">
+      <textarea name="resposta" placeholder="Resposta ou instrução (prompt) a aplicar"></textarea>
+      <button>Adicionar</button>
+    </form>
+  </div>
+  <div class="card" th:each="s : ${itens}">
+    <form th:action="@{/situacoes/salvar}" method="post">
+      <input type="hidden" name="id" th:value="${s.id}">
+      <div class="row">
+        <span class="tag" th:classappend="${s.status}" th:text="${s.status}"></span>
+        <span class="tag" th:text="${s.origem}"></span>
+        <span class="mut" th:text="${s.portal} + ' · ' + ${s.usos} + ' uso(s) · ' + ${s.criadoEm}"></span>
+      </div>
+      <input type="text" name="pergunta" th:value="${s.padraoPergunta}" style="margin-top:6px">
+      <textarea name="resposta" th:text="${s.promptOuResposta}"></textarea>
+      <div class="row">
+        <select name="status">
+          <option th:each="o : ${ {'ativa','inativa'} }" th:value="${o}" th:text="${o}" th:selected="${o==s.status}"></option>
+          <option th:if="${s.status!='ativa' and s.status!='inativa'}" th:value="${s.status}" th:text="${s.status}" selected></option>
+        </select>
+        <button>Salvar</button>
+        <button class="del" th:formaction="@{/situacoes/{id}/excluir(id=${s.id})}" onclick="return confirm('Excluir?')">Excluir</button>
+      </div>
+      <p class="mut" th:if="${s.contexto != null and !s.contexto.isBlank()}" th:text="'Contexto: ' + ${#strings.abbreviate(s.contexto, 200)}"></p>
+    </form>
+  </div>
+</main>
+</body>
+</html>
