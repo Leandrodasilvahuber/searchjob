@@ -31,6 +31,12 @@ public class CandidaturaRepo {
                 .param(url).query(Integer.class).single() > 0;
     }
 
+    /** URLs de vagas já enviadas ou puladas (para montar o conjunto de deduplicação). */
+    public List<String> urlsProcessadas() {
+        return jdbc.sql("SELECT url FROM candidatura WHERE status IN ('enviada','pulada') AND url IS NOT NULL")
+                .query(String.class).list();
+    }
+
     public long inserir(String portal, String empresa, String cargo, String url, String cv,
                         String status, String motivo, String data) {
         jdbc.sql("INSERT INTO candidatura(portal, empresa, cargo, url, cv_usado, status, motivo, data) "

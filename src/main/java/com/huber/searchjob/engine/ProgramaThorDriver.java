@@ -1,0 +1,74 @@
+package com.huber.searchjob.engine;
+
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/** ProgramaThor: listagem pública em /jobs-<termo>; a candidatura exige login e usa o botão "Quero me candidatar". */
+public class ProgramaThorDriver extends PortalWebDriver {
+    private static final Pattern INICIO = Pattern.compile("<a href=\"(/jobs/[^\"]+)\">");
+    private static final Pattern TITULO = Pattern.compile("<h3[^>]*>(.*?)</h3>", Pattern.DOTALL);
+    private static final Pattern SPAN = Pattern.compile("<span><i class='[^']*'></i>([^<]*)</span>");
+
+    public ProgramaThorDriver(NavegadorFirefox navegador, SituacaoService situacoes) {
+        super(navegador, situacoes);
+    }
+
+    @Override
+    public String nome() {
+        return "ProgramaThor";
+    }
+
+    @Override
+    public List<Vaga> buscar(String termo, int max) throws Exception {
+        String slug = URLEncoder.encode(Texto.normalizar(termo).replace(' ', '-'), StandardCharsets.UTF_8);
+        return parse(get("https://programathor.com.br/jobs-" + slug), max);
+    }
+
+    static List<Vaga> parse(String html, int max) {
+        List<Vaga> out = new ArrayList<>();
+        Matcher m = INICIO.matcher(html);
+        List<int[]> pos = new ArrayList<>();
+        List<String> paths = new ArrayList<>();
+        while (m.find()) {
+            pos.add(new int[] {m.end()});
+            paths.add(m.group(1));
+        }
+        for (int i = 0; i < paths.size() && out.size() < max; i++) {
+            int fim = i + 1 < pos.size() ? pos.get(i + 1)[0] : html.length();
+            String bloco = html.substring(pos.get(i)[0], fim);
+            Matcher t = TITULO.matcher(bloco);
+            if (!t.find()) continue; // links de menu/rodapé para /jobs não têm card
+            List<String> spans = new ArrayList<>();
+            Matcher s = SPAN.matcher(bloco);
+            while (s.find()) spans.add(Html.texto(s.group(1)));
+            String path = paths.get(i);
+            String id = path.replaceAll("^/jobs/(\\d+).*", "$1");
+            String empresa = spans.size() > 0 ? spans.get(0) : "";
+            String local = spans.size() > 1 ? spans.get(1) : "";
+            String regime = spans.size() > 4 ? spans.get(4) : "";
+            // a listagem não traz data de publicação: fica nula e passa no filtro de recência
+            out.add(new Vaga("ProgramaThor", id, empresa, Html.texto(t.group(1)),
+                    "https://programathor.com.br" + path, local, local, null, regime + " " + Html.texto(bloco)));
+        }
+        return out;
+    }
+
+    @Override
+    protected String[] botoesAvanco() {
+        return new String[] {"Continuar", "Próximo"};
+    }
+
+    @Override
+    protected String[] botoesEnvio() {
+        return new String[] {"Quero me candidatar", "Candidatar-se", "Candidatar", "Enviar candidatura"};
+    }
+
+    @Override
+    protected String[] textosSucesso() {
+        return new String[] {"candidatura enviada", "voce se candidatou com sucesso", "candidatura realizada"};
+    }
+}

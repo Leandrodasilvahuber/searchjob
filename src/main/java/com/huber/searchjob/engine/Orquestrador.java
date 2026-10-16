@@ -34,6 +34,7 @@ public class Orquestrador {
     private volatile int processadas, enviadas, puladas, erros;
     private final Deque<String> log = new ArrayDeque<>();
     private Thread thread;
+    private final Set<String> bloqueados = new HashSet<>();
 
     public Orquestrador(KvRepo kv, CandidaturaRepo candidaturas, CvRepo cvs, FiltroVaga filtro, EscolhaCv escolhaCv,
                         SituacaoService situacoes, ZaiClient zai, CvContexto cvContexto, Aviso aviso) {
@@ -84,7 +85,15 @@ public class Orquestrador {
         List<PortalDriver> drivers = new ArrayList<>();
         try {
             for (String p : kv.get(KvRepo.CONFIG, "portais", "gupy").split(",")) {
-                if (p.trim().equalsIgnoreCase("gupy")) drivers.add(new GupyDriver(navegador, situacoes));
+                switch (p.trim().toLowerCase()) {
+                    case "gupy" -> drivers.add(new GupyDriver(navegador, situacoes));
+                    case "programathor" -> drivers.add(new ProgramaThorDriver(navegador, situacoes));
+                    case "catho" -> drivers.add(new CathoDriver(navegador, situacoes));
+                    case "indeed" -> drivers.add(new IndeedDriver(navegador, situacoes,
+                            Integer.parseInt(kv.get(KvRepo.PREF, "recencia_dias", "14"))));
+                    case "" -> { }
+                    default -> registrar("portal \"" + p.trim() + "\" ainda não é suportado — ignorado");
+                }
             }
             boolean zaiAvalia = "zai".equals(kv.get(KvRepo.CONFIG, "modo", "codigo"));
             boolean dryRun = Boolean.parseBoolean(kv.get(KvRepo.CONFIG, "dry_run", "true"));
@@ -95,26 +104,35 @@ public class Orquestrador {
             }
             registrar("sessão iniciada · modo " + (zaiAvalia ? "z.ai avalia" : "código") + (dryRun ? " · dry-run" : ""));
             Set<String> vistas = new HashSet<>();
+            Set<String> feitas = new HashSet<>();
+            bloqueados.clear();
+            candidaturas.urlsProcessadas().forEach(u -> feitas.add(ChaveVaga.de(u)));
             for (PortalDriver driver : drivers) {
                 for (String termo : kv.get(KvRepo.PREF, "termos", "").split(",")) {
-                    if (!rodando || termo.isBlank()) continue;
+                    if (!rodando || termo.isBlank() || bloqueados.contains(driver.nome())) continue;
                     registrar(driver.nome() + ": buscando \"" + termo.trim() + "\"");
                     List<Vaga> vagas;
                     try {
                         vagas = driver.buscar(termo.trim(), max);
                     } catch (Exception e) {
-                        registrar("erro na busca: " + e.getMessage());
+                        registrar("erro na busca (" + driver.nome() + "): " + e.getMessage());
+                        if (e.getMessage() != null && e.getMessage().contains("CAPTCHA")) {
+                            bloqueados.add(driver.nome());
+                            aviso.login();
+                        }
                         continue;
                     }
                     for (Vaga v : vagas) {
-                        if (!rodando) break;
-                        if (!vistas.add(v.url()) || candidaturas.jaProcessada(v.url())) continue;
+                        if (!rodando || bloqueados.contains(driver.nome())) break;
+                        String chave = ChaveVaga.de(v.url());
+                        if (!vistas.add(chave) || feitas.contains(chave)) continue;
                         processar(driver, v, zaiAvalia, dryRun);
                     }
                 }
             }
             registrar("✨ terminei — " + processadas + " processadas · " + enviadas + " enviadas · "
                     + puladas + " puladas · " + erros + " erros");
+            if (rodando) aviso.fim(); // não toca se o usuário parou a sessão
         } catch (Exception e) {
             registrar("sessão interrompida: " + e.getMessage());
         } finally {
@@ -131,6 +149,7 @@ public class Orquestrador {
         if (descarte.isPresent()) {
             candidaturas.inserir(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", descarte.get(), null);
             puladas++;
+            aviso.pulada();
             registrar("pulada: " + rotulo + " (" + descarte.get() + ")");
             return;
         }
@@ -142,6 +161,7 @@ public class Orquestrador {
                     String motivo = "z.ai: " + r.path("motivo").asText("fora do perfil");
                     candidaturas.inserir(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", motivo, null);
                     puladas++;
+                    aviso.pulada();
                     registrar("pulada: " + rotulo + " (" + motivo + ")");
                     return;
                 }
@@ -187,9 +207,20 @@ public class Orquestrador {
             }
             case PRECISA_USUARIO -> {
                 candidaturas.atualizarStatus(id, "aguardando_usuario", d.motivo());
-                aviso.chamarUsuario();
+                if (d.motivo().contains("login") || d.motivo().toLowerCase().contains("captcha")) aviso.login();
+                else aviso.chamarUsuario();
                 registrar("preciso de você: " + rotulo + " (" + d.motivo() + ")");
-                if (d.motivo().contains("login") || d.motivo().toLowerCase().contains("captcha")) rodando = false;
+                if (d.motivo().contains("login") || d.motivo().toLowerCase().contains("captcha")) {
+                    // só este portal fica de fora; os demais seguem. Logue na janela do Firefox e inicie de novo.
+                    bloqueados.add(driver.nome());
+                    registrar(driver.nome() + " pulado nesta rodada até você logar");
+                }
+            }
+            case PULADA -> {
+                candidaturas.atualizarStatus(id, "pulada", d.motivo());
+                puladas++;
+                aviso.pulada();
+                registrar("pulada: " + rotulo + " (" + d.motivo() + ")");
             }
             default -> {
                 candidaturas.atualizarStatus(id, "erro", d.motivo());

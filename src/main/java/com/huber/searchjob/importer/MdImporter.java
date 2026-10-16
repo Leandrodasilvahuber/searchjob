@@ -97,7 +97,7 @@ public class MdImporter {
         padrao(KvRepo.PREF, "excluir_titulos", "estagio,estagiario,jovem aprendiz,banco de talentos");
         padrao(KvRepo.PREF, "exige_ingles_oral", "calls em ingles,reunioes em ingles,fluencia oral,ingles fluente,ingles avancado,english fluent,fluent english");
         padrao(KvRepo.CONFIG, "modo", "codigo");
-        padrao(KvRepo.CONFIG, "portais", "gupy");
+        padrao(KvRepo.CONFIG, "portais", "gupy,programathor,catho,indeed");
         padrao(KvRepo.CONFIG, "dry_run", "true");
         padrao(KvRepo.CONFIG, "zai_url", "https://api.z.ai/api/paas/v4/chat/completions");
         padrao(KvRepo.CONFIG, "zai_modelo", "glm-4.6");
