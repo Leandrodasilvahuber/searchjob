@@ -5,14 +5,24 @@
 <nav th:replace="~{layout :: menu(${pagina})}"></nav>
 <main>
   <h1>Painel</h1>
+  <div id="impedimento" class="card chamando" hidden>
+    <b id="imp-titulo"></b>
+    <p id="imp-texto" class="mut"></p>
+    <div class="row">
+      <button id="imp-resolvido">Resolvido</button>
+      <button id="imp-pular" class="del">Pular</button>
+      <a id="imp-abrir" th:href="@{/pendencias}" hidden>Abrir pendências</a>
+    </div>
+    <p class="mut" style="margin:6px 0 0">O bip repete até você clicar em Resolvido ou Pular.</p>
+  </div>
   <div id="chamando" class="card chamando" th:if="${pendencias > 0}">
     🔔 Preciso de você: <b th:text="${pendencias}">1</b> pendência(s) —
     <a th:href="@{/pendencias}">abrir pendências</a>
   </div>
   <div class="card">
     <div class="row">
-      <form th:action="@{/iniciar}" method="post" th:unless="${estado.rodando}"><button>▶ Iniciar busca</button></form>
-      <form th:action="@{/parar}" method="post" th:if="${estado.rodando}"><button class="del">■ Parar</button></form>
+      <form id="f-iniciar" th:action="@{/iniciar}" method="post" th:hidden="${estado.rodando}"><button>▶ Iniciar busca</button></form>
+      <form id="f-parar" th:action="@{/parar}" method="post" th:hidden="${!estado.rodando}"><button class="del">■ Parar</button></form>
       <span class="tag" id="estado" th:text="${estado.rodando} ? 'rodando' : 'parado'">parado</span>
       <span class="mut" id="msg" th:text="${estado.mensagem}"></span>
     </div>
@@ -29,26 +39,94 @@
       <label><input type="checkbox" th:checked="${dryRun}" onchange="document.getElementById('dr').value=this.checked; this.form.submit()"> Dry-run (preenche mas não envia)</label>
       <input type="hidden" name="ligado" id="dr" th:value="${dryRun}">
     </form>
+    <form th:action="@{/naointeragir}" method="post" class="row" style="margin-top:8px">
+      <label><input type="checkbox" th:checked="${naoInteragir}" onchange="document.getElementById('ni').value=this.checked; this.form.submit()"> Não interagir (pula a vaga em vez de me chamar; só avisa para logar)</label>
+      <input type="hidden" name="ligado" id="ni" th:value="${naoInteragir}">
+    </form>
     <p class="mut" style="margin:6px 0 0">Atenção: no Gupy, mesmo em dry-run o "Salvar e continuar" grava as respostas no seu perfil da Gupy; só o envio final é evitado.</p>
   </div>
-  <div class="card"><b>Log</b>
-    <pre id="log" th:text="${#strings.listJoin(estado.log, '&#10;')}"></pre>
+  <div class="card"><div class="row"><b>Log</b> <button type="button" id="limpar-log" class="sec">Limpar log</button></div>
+    <ul id="log" class="log"></ul>
+  </div>
+  <div id="modal" class="modal" hidden>
+    <div class="caixa">
+      <h2>Erro ao enviar</h2>
+      <p id="m-detalhe"></p>
+      <b>Log da sessão</b>
+      <pre id="m-log"></pre>
+      <button id="m-fechar">Fechar</button>
+    </div>
   </div>
 </main>
+<style>
+  .log { list-style:none; margin:8px 0 0; padding:0; max-height:360px; overflow:auto; font-size:14px; }
+  .log li { padding:3px 0; border-bottom:1px solid var(--bd); display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+  .log .h { color:var(--mut); font-size:12px; }
+  .log .t-enviada { color:var(--ok); } .log .t-erro { color:var(--bad); } .log .t-aguardando { color:var(--warn); font-weight:600; }
+  .log .t-pulada { color:var(--mut); }
+  .log button { padding:1px 8px; font-size:12px; }
+  .modal { position:fixed; inset:0; z-index:50; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; }
+  .modal[hidden] { display:none; }
+  .modal .caixa { background:var(--card); border:2px solid var(--bad); border-radius:12px; padding:20px; max-width:720px; width:calc(100% - 32px); max-height:85vh; overflow:auto; }
+  .modal h2 { margin:0 0 8px; font-size:20px; }
+</style>
 <script th:inline="javascript">
   let antes = /*[[${pendencias}]]*/ 0;
-  setInterval(async () => {
+  const $ = id => document.getElementById(id);
+  const ROTULO = { info:'', encontrada:'🔎', aberta:'📂', preenchida:'✍️', enviada:'✅', aguardando:'⏸️', pulada:'⏭️', erro:'❌' };
+  let ultimoLog = [];
+  const post = d => fetch('/chamado/' + d, { method: 'POST' });
+  $('imp-resolvido').onclick = () => post('continuar');
+  $('imp-pular').onclick = () => post('pular');
+  $('limpar-log').onclick = async () => { await fetch('/limparlog', { method: 'POST' }); desenharLog([]); };
+  $('m-fechar').onclick = () => { $('modal').hidden = true; };
+  function abrirErro(ev) {
+    $('m-detalhe').textContent = ev.texto + (ev.detalhe ? ' — ' + ev.detalhe : '');
+    $('m-log').textContent = ultimoLog.slice().reverse().map(e => e.hora + ' ' + e.texto + (e.detalhe && e.tipo === 'erro' ? ' — ' + e.detalhe : '')).join('\n');
+    $('modal').hidden = false;
+  }
+  function desenharLog(log) {
+    ultimoLog = log;
+    const ul = $('log'); ul.textContent = '';
+    for (const ev of log) {
+      const li = document.createElement('li');
+      const h = document.createElement('span'); h.className = 'h'; h.textContent = ev.hora; li.appendChild(h);
+      const t = document.createElement('span'); t.className = 't-' + ev.tipo; t.textContent = (ROTULO[ev.tipo] ? ROTULO[ev.tipo] + ' ' : '') + ev.texto; li.appendChild(t);
+      if (ev.tipo === 'erro') {
+        const b = document.createElement('button'); b.className = 'sec'; b.textContent = 'ver log'; b.onclick = () => abrirErro(ev); li.appendChild(b);
+      } else if (ev.tipo === 'aguardando' && ev.detalhe === 'PENDENCIA') {
+        const a = document.createElement('a'); a.href = '/pendencias'; a.textContent = 'resolver pendência'; li.appendChild(a);
+      }
+      ul.appendChild(li);
+    }
+  }
+  function desenharImpedimento(c) {
+    $('impedimento').hidden = !c;
+    if (!c) return;
+    const login = c.tipo === 'LOGIN';
+    $('imp-titulo').textContent = login ? '🔐 Login necessário em ' + c.portal : '📝 Pendência em ' + c.portal;
+    $('imp-texto').textContent = (c.vaga ? c.vaga + ' — ' : '') + c.motivo
+      + (login ? '. Faça login na janela do Firefox do robô e clique em Resolvido.' : '.');
+    $('imp-pular').textContent = login ? 'Pular portal' : 'Pular vaga';
+    $('imp-abrir').hidden = login;
+  }
+  async function atualizar() {
     try {
       const r = await (await fetch('/api/estado')).json();
       const e = r.estado;
-      document.getElementById('estado').textContent = e.rodando ? 'rodando' : 'parado';
-      document.getElementById('msg').textContent = e.mensagem;
-      document.getElementById('contadores').textContent =
+      $('estado').textContent = e.rodando ? 'rodando' : 'parado';
+      $('f-iniciar').hidden = e.rodando;
+      $('f-parar').hidden = !e.rodando;
+      $('msg').textContent = e.mensagem;
+      $('contadores').textContent =
         `${e.processadas} processadas · ${e.enviadas} enviadas · ${e.puladas} puladas · ${e.erros} erros`;
-      document.getElementById('log').textContent = e.log.join('\n');
-      if (r.pendencias !== antes) { antes = r.pendencias; if (antes > 0) location.reload(); }
+      desenharLog(e.log);
+      desenharImpedimento(e.chamado);
+      if (r.pendencias !== antes) { antes = r.pendencias; if (antes > 0 && $('ni').value !== 'true') location.reload(); }
     } catch (_) {}
-  }, 3000);
+  }
+  atualizar();
+  setInterval(atualizar, 2000);
 </script>
 </body>
 </html>

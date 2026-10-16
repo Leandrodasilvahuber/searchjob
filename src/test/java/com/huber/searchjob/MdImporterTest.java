@@ -29,6 +29,7 @@ class MdImporterTest extends BaseIT {
         kv.remover(KvRepo.CONFIG, "md_importado");
         kv.todos(KvRepo.DADO).keySet().forEach(k -> kv.remover(KvRepo.DADO, k)); // banco temporário é compartilhado
         situacoes.todas().forEach(x -> situacoes.excluir(x.id())); // banco temporário é compartilhado entre testes
+        candidaturas.listar("", "").forEach(c -> candidaturas.excluir(c.id())); // o importador só importa com a tabela vazia
         var r = importer.importar(PASTA);
         System.out.println("IMPORTADO: " + r);
         assertTrue(r.dadosFixos() >= 8, "dados fixos");

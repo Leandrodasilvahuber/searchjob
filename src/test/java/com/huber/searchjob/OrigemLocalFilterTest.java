@@ -40,10 +40,10 @@ class OrigemLocalFilterTest extends BaseIT {
     @Test
     void chaveDaZaiNuncaApareceNaPagina() throws Exception {
         mvc.perform(post("/kv/config").header("Origin", "http://localhost:8787")
-                .param("chave", "zai_chave").param("valor", "SEGREDO-123"));
+                .param("chave", "openrouter_chave").param("valor", "SEGREDO-123"));
         String html = mvc.perform(get("/kv/config").header("Host", "localhost")).andReturn().getResponse().getContentAsString();
         org.junit.jupiter.api.Assertions.assertFalse(html.contains("SEGREDO-123"));
-        mvc.perform(post("/kv/config").header("Origin", "http://localhost:8787").param("chave", "zai_chave").param("valor", ""));
+        mvc.perform(post("/kv/config").header("Origin", "http://localhost:8787").param("chave", "openrouter_chave").param("valor", ""));
         org.junit.jupiter.api.Assertions.assertFalse(
                 mvc.perform(get("/kv/config").header("Host", "localhost")).andReturn().getResponse().getContentAsString().isEmpty());
     }

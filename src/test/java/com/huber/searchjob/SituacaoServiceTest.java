@@ -121,6 +121,21 @@ class SituacaoServiceTest extends BaseIT {
     }
 
     @Test
+    void naoInteragirNaoEsperaNemChamaUsuario() {
+        when(zai.configurado()).thenReturn(false);
+        kv.put(KvRepo.CONFIG, "nao_interagir", "true");
+        try {
+            var r = service.resolver("Gupy", "Qual o time de futebol do diretor?", "", () -> true);
+            assertEquals(Tipo.SEM_RESPOSTA, r.tipo());
+            var s = service.resolver("Gupy", "Informe o número do RG", "", () -> true);
+            assertEquals(Tipo.SENSIVEL, s.tipo());
+            org.mockito.Mockito.verify(aviso, org.mockito.Mockito.never()).chamarUsuario();
+        } finally {
+            kv.put(KvRepo.CONFIG, "nao_interagir", "false");
+        }
+    }
+
+    @Test
     void dadosSensiveisNaoVaoParaOPrompt() {
         kv.put(KvRepo.DADO, "CPF", "807.998.920-68");
         kv.put(KvRepo.DADO, "Nome da mãe", "Fulana");

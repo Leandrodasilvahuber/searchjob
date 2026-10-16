@@ -43,3 +43,12 @@ CREATE TABLE IF NOT EXISTS texto_gerado (
   texto TEXT,
   criado_em TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS credencial (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  portal TEXT NOT NULL,
+  usuario TEXT NOT NULL,
+  senha_cifrada TEXT NOT NULL,
+  ativa INTEGER NOT NULL DEFAULT 0,
+  atualizado_em TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (portal, usuario)
+);

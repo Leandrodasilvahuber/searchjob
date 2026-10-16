@@ -92,7 +92,7 @@ public class SituacaoService {
             if (r != null) return r;
         }
         if (sensivel(pergunta)) {
-            aviso.chamarUsuario();
+            if (!naoInteragir()) aviso.chamarUsuario();
             return new Resultado(Tipo.SENSIVEL, null, 0);
         }
 
@@ -108,6 +108,7 @@ public class SituacaoService {
         // já existe pendência aberta para esta pergunta (outra tentativa ou rodada): reusa em vez de duplicar
         Optional<Situacao> aberta = repo.pendentePorHash(hash);
         if (aberta.isPresent()) {
+            if (naoInteragir()) return new Resultado(Tipo.SEM_RESPOSTA, null, aberta.get().id());
             aviso.chamarUsuario();
             return aguardar(aberta.get().id(),
                     SituacaoRepo.PENDENTE_CONFIRMACAO.equals(aberta.get().status()) ? Tipo.CONFIRMADA_PELO_USUARIO : Tipo.RESPONDIDA_PELO_USUARIO,
@@ -123,14 +124,21 @@ public class SituacaoService {
             if (r != null && r.path("resolvido").asBoolean(false) && !r.path("resposta").asText("").isBlank()) {
                 id = repo.inserir(portal, "pergunta", pergunta, hash, r.path("resposta").asText(),
                         "zai", SituacaoRepo.PENDENTE_CONFIRMACAO, contextoVaga);
+                if (naoInteragir()) return new Resultado(Tipo.SEM_RESPOSTA, null, id);
                 aviso.chamarUsuario();
                 return aguardar(id, Tipo.CONFIRMADA_PELO_USUARIO, continuar);
             }
         }
         id = repo.inserir(portal, "pergunta", pergunta, hash, null, "usuario",
                 SituacaoRepo.AGUARDANDO_USUARIO, contextoVaga);
+        if (naoInteragir()) return new Resultado(Tipo.SEM_RESPOSTA, null, id);
         aviso.chamarUsuario();
         return aguardar(id, Tipo.RESPONDIDA_PELO_USUARIO, continuar);
+    }
+
+    /** Modo "não interagir": pergunta sem resposta vira vaga pulada, sem bip nem espera (a pendência fica registrada). */
+    private boolean naoInteragir() {
+        return kv.booleano(KvRepo.CONFIG, "nao_interagir", false);
     }
 
     private Resultado aguardar(long id, Tipo tipoOk, BooleanSupplier continuar) {

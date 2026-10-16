@@ -57,6 +57,24 @@ public class ProgramaThorDriver extends PortalWebDriver {
         return out;
     }
 
+    /**
+     * Na vaga deslogada o botão "Quero me candidatar" leva ao CADASTRO (/users/sign_up, com reCAPTCHA), não ao login.
+     * Por isso o login automático abre antes a página de login de verdade.
+     */
+    @Override
+    public boolean entrar(String usuario, String senha) {
+        navegador.driver().get("https://programathor.com.br/users/sign_in");
+        pausa(1500);
+        return super.entrar(usuario, senha);
+    }
+
+    @Override
+    protected String[] textosBloqueio() {
+        // ex.: "Você não pode se candidatar: esta vaga requer habilidade(s) que você não possui."
+        // a segunda frase é a página de erro 500 do próprio portal (algumas vagas quebram até logado)
+        return new String[] {"voce nao pode se candidatar", "ha algo de errado com essa pagina"};
+    }
+
     @Override
     protected String[] botoesAvanco() {
         return new String[] {"Continuar", "Próximo"};

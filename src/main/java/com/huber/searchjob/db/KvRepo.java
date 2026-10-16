@@ -34,6 +34,11 @@ public class KvRepo {
         }
     }
 
+    /** Valor booleano da configuração ("true" liga); usa o padrão se a chave não existir. */
+    public boolean booleano(String tabela, String chave, boolean padrao) {
+        return Boolean.parseBoolean(get(tabela, chave, String.valueOf(padrao)).trim());
+    }
+
     private static String t(String tabela) {
         if (!TABELAS.contains(tabela)) throw new IllegalArgumentException(tabela);
         return tabela;

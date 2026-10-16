@@ -55,6 +55,13 @@ class FormularioFirefoxE2ETest extends BaseIT {
         pagina("/login", "<h1>Entrar</h1><input type=password id=p><button>Entrar</button>");
         pagina("/escondido", "<div style='display:none'><input type=password></div><h1>Vaga</h1>"
                 + "<button onclick=\"document.body.innerHTML+='<p>Candidatura enviada</p>'\">Quero me candidatar</button>");
+        pagina("/entrar", "<h1>Entrar</h1><input type=email id=u><input type=password id=p>"
+                + "<button onclick=\"document.title=document.getElementById('u').value+'|'+document.getElementById('p').value\">Entrar</button>");
+        pagina("/entrar2", "<h1>Entrar</h1><input type=email id=u><div id=etapa></div>"
+                + "<button onclick=\"document.getElementById('etapa').innerHTML='<input type=password id=p>';"
+                + "this.onclick=function(){document.title=document.getElementById('u').value+'|'+document.getElementById('p').value}\">Continuar</button>");
+        pagina("/bloqueada", "<h1>Vaga</h1><p>Você não pode se candidatar : esta vaga requer habilidade(s) que você não possui.</p>");
+        pagina("/externa", "<h1>Vaga</h1><button onclick=\"alert('Você será redirecionado ao sistema de seleção da empresa')\">Quero me candidatar</button>");
         pagina("/ja", "<h1>Vaga</h1><p>Você já se candidatou a esta vaga</p>");
         servidor.start();
         base = "http://127.0.0.1:" + servidor.getAddress().getPort();
@@ -104,6 +111,11 @@ class FormularioFirefoxE2ETest extends BaseIT {
         @Override
         protected String[] textosSucesso() {
             return new String[] {"candidatura enviada"};
+        }
+
+        @Override
+        protected String[] textosBloqueio() {
+            return new String[] {"voce nao pode se candidatar"};
         }
     }
 
@@ -172,6 +184,51 @@ class FormularioFirefoxE2ETest extends BaseIT {
         try {
             var r = new PortalLocal(nav, situacoes).candidatar(vaga("/ja"), CV, false, () -> true);
             assertEquals(PortalDriver.Status.PULADA, r.status());
+        } finally {
+            nav.fechar();
+        }
+    }
+
+    @Test
+    void vagaQueOPortalNaoPermiteEPuladaComOMotivo() {
+        NavegadorFirefox nav = navegador();
+        try {
+            var r = new PortalLocal(nav, situacoes).candidatar(vaga("/bloqueada"), CV, false, () -> true);
+            assertEquals(PortalDriver.Status.PULADA, r.status(), r.motivo());
+            assertTrue(r.motivo().contains("requer habilidade"), r.motivo());
+        } finally {
+            nav.fechar();
+        }
+    }
+
+    @Test
+    void vagaExternaComAlertaEPuladaSemQuebrarASessao() {
+        NavegadorFirefox nav = navegador();
+        try {
+            var r = new PortalLocal(nav, situacoes).candidatar(vaga("/externa"), CV, false, () -> true);
+            assertEquals(PortalDriver.Status.PULADA, r.status(), r.motivo());
+            assertTrue(r.motivo().contains("vaga externa"), r.motivo());
+            assertTrue(r.motivo().contains("redirecionado"), r.motivo());
+        } finally {
+            nav.fechar();
+        }
+    }
+
+    @Test
+    void loginAutomaticoPreencheUmaEDuasEtapas() {
+        NavegadorFirefox nav = navegador();
+        try {
+            var d = nav.driver();
+            d.get(base + "/entrar");
+            assertTrue(com.huber.searchjob.engine.LoginAutomatico.entrar(d, "eu@x.com", "senha1"));
+            assertEquals("eu@x.com|senha1", d.getTitle());
+
+            d.get(base + "/entrar2");
+            assertTrue(com.huber.searchjob.engine.LoginAutomatico.entrar(d, "eu@x.com", "senha2"));
+            assertEquals("eu@x.com|senha2", d.getTitle());
+
+            d.get(base + "/ja");
+            assertFalse(com.huber.searchjob.engine.LoginAutomatico.entrar(d, "x", "y"), "sem formulário de login não faz nada");
         } finally {
             nav.fechar();
         }

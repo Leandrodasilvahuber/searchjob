@@ -65,6 +65,13 @@ class FiltroVagaUnitTest {
     }
 
     @Test
+    void javaOnlyDescartaSoSemStackAceitaNoTituloOuDescricao() {
+        assertTrue(r("Desenvolvedor Full Stack Java (Pleno)", "Java, Spring Boot e Angular").isPresent());
+        assertTrue(r("Desenvolvedor Full Stack Java", "Java com React no front").isEmpty());
+        assertTrue(r("Dev Node", "integração com java").isEmpty());
+    }
+
+    @Test
     void descartaForaDoBrasil() {
         assertEquals("vaga fora do Brasil",
                 filtro.motivoDescarte(vaga("Dev", "", HOJE, "Lisboa Portugal"), HOJE).orElse(""));

@@ -101,12 +101,12 @@ class InterfaceE2ETest extends BaseIT {
         assertEquals("false", kv.get(KvRepo.CONFIG, "dry_run", ""));
         http.post("/dryrun", Map.of("ligado", "true"));
 
-        http.post("/kv/config", Map.of("chave", "zai_chave", "valor", "SEGREDO-E2E"));
-        assertEquals("SEGREDO-E2E", kv.get(KvRepo.CONFIG, "zai_chave", ""));
+        http.post("/kv/config", Map.of("chave", "openrouter_chave", "valor", "SEGREDO-E2E"));
+        assertEquals("SEGREDO-E2E", kv.get(KvRepo.CONFIG, "openrouter_chave", ""));
         assertFalse(http.get("/kv/config").corpo().contains("SEGREDO-E2E"));
-        http.post("/kv/config", Map.of("chave", "zai_chave", "valor", ""));
-        assertEquals("SEGREDO-E2E", kv.get(KvRepo.CONFIG, "zai_chave", ""), "salvar em branco mantém a chave");
-        kv.put(KvRepo.CONFIG, "zai_chave", "");
+        http.post("/kv/config", Map.of("chave", "openrouter_chave", "valor", ""));
+        assertEquals("SEGREDO-E2E", kv.get(KvRepo.CONFIG, "openrouter_chave", ""), "salvar em branco mantém a chave");
+        kv.put(KvRepo.CONFIG, "openrouter_chave", "");
 
         http.post("/kv/preferencia", Map.of("chave", "pref_e2e", "valor", "1"));
         assertEquals("1", kv.get(KvRepo.PREF, "pref_e2e", ""));

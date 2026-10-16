@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huber.searchjob.BaseIT;
 import com.huber.searchjob.db.Candidatura;
 import com.huber.searchjob.db.CandidaturaRepo;
+import com.huber.searchjob.db.CredencialRepo;
 import com.huber.searchjob.db.Cv;
 import com.huber.searchjob.db.CvRepo;
 import com.huber.searchjob.db.KvRepo;
@@ -51,6 +52,7 @@ class SessaoE2ETest extends BaseIT {
     @Autowired CandidaturaRepo candidaturas;
     @Autowired MdImporter importer;
     @Autowired JdbcClient jdbc;
+    @Autowired CredencialRepo credenciais;
 
     private final FakePortal portal = new FakePortal();
     private Http http;
@@ -61,6 +63,21 @@ class SessaoE2ETest extends BaseIT {
         final Map<String, Integer> tentativas = new HashMap<>();
         final Map<String, String> cvPorUrl = new HashMap<>();
         List<Vaga> vagas = List.of();
+        /** Login "digitado pelo usuário" que lerLogin devolve, e logins usados por entrar(). */
+        volatile String[] digitado = {null, null};
+        final List<String> entradas = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        @Override
+        public boolean entrar(String usuario, String senha) {
+            entradas.add(usuario + ":" + senha);
+            desfechos.clear(); // logou: a vaga volta a passar
+            return true;
+        }
+
+        @Override
+        public String[] lerLogin() {
+            return digitado;
+        }
 
         @Override
         public String nome() {
@@ -90,6 +107,9 @@ class SessaoE2ETest extends BaseIT {
         importer.importar(Path.of("/nao/existe")); // semeia preferências padrão
         jdbc.sql("DELETE FROM candidatura").update();
         jdbc.sql("DELETE FROM cv").update();
+        jdbc.sql("DELETE FROM credencial").update();
+        portal.entradas.clear();
+        portal.digitado = new String[] {null, null};
         cvs.salvar("CV_NodeJS", "", "texto node", "node,typescript");
         cvs.salvar("CV_PHP_Laravel", "", "texto php", "php,laravel,vue");
         kv.put(KvRepo.CONFIG, "portais", "fake");
@@ -109,6 +129,9 @@ class SessaoE2ETest extends BaseIT {
         for (int i = 0; i < 150; i++) {
             Thread.sleep(200);
             JsonNode e = JSON.readTree(http.get("/api/estado").corpo()).path("estado");
+            if (!e.path("chamado").isNull() && !e.path("chamado").isMissingNode()) {
+                http.post("/chamado/pular", Map.of()); // o usuário não logou: pula o portal
+            }
             if (!e.path("rodando").asBoolean() && e.path("log").toString().contains("terminei")) {
                 Thread.sleep(300); // deixa a thread da sessão terminar de vez
                 return e;
@@ -156,6 +179,84 @@ class SessaoE2ETest extends BaseIT {
         assertEquals("enviada", h.get("https://fake.test/c").status());
         assertEquals("enviada", h.get("https://fake.test/d").status());
         assertEquals(4, candidaturas.listar("", "").size(), "nenhuma linha duplicada no histórico");
+    }
+
+    @Test
+    void chamadoDeLoginPausaAteContinuarERetomaAMesmaVaga() throws Exception {
+        portal.vagas = List.of(vaga("l", "Dev Laravel", "php laravel"));
+        portal.desfechos.put("https://fake.test/l",
+                new PortalDriver.Desfecho(PortalDriver.Status.PRECISA_USUARIO, "login necessário em Fake"));
+        assertEquals(302, http.post("/iniciar", Map.of()).status());
+        JsonNode chamado = null;
+        for (int i = 0; i < 100 && (chamado == null || chamado.isNull()); i++) {
+            Thread.sleep(200);
+            chamado = JSON.readTree(http.get("/api/estado").corpo()).path("estado").path("chamado");
+        }
+        assertEquals("LOGIN", chamado.path("tipo").asText());
+        portal.desfechos.clear(); // o usuário logou
+        http.post("/chamado/continuar", Map.of());
+        for (int i = 0; i < 100; i++) {
+            Thread.sleep(200);
+            if (JSON.readTree(http.get("/api/estado").corpo()).path("estado").path("log").toString().contains("terminei")) break;
+        }
+        assertEquals("enviada", historico().get("https://fake.test/l").status());
+        assertEquals(2, portal.tentativas.get("https://fake.test/l"));
+    }
+
+    @Test
+    void comLoginSalvoEntraSozinhoSemChamarOUsuario() throws Exception {
+        credenciais.salvar("fake", "eu@x.com", "pw1");
+        portal.vagas = List.of(vaga("s", "Dev Laravel", "php laravel"));
+        portal.desfechos.put("https://fake.test/s",
+                new PortalDriver.Desfecho(PortalDriver.Status.PRECISA_USUARIO, "login necessário em Fake"));
+        JsonNode e = rodar();
+        assertEquals(List.of("eu@x.com:pw1"), portal.entradas);
+        assertEquals("enviada", historico().get("https://fake.test/s").status());
+        assertFalse(e.path("log").toString().contains("aguardando"), "não deve chamar o usuário");
+    }
+
+    @Test
+    void semLoginSalvoChamaOUsuarioESalvaOQueEleDigitou() throws Exception {
+        portal.vagas = List.of(vaga("n", "Dev Laravel", "php laravel"));
+        portal.desfechos.put("https://fake.test/n",
+                new PortalDriver.Desfecho(PortalDriver.Status.PRECISA_USUARIO, "login necessário em Fake"));
+        assertEquals(302, http.post("/iniciar", Map.of()).status());
+        JsonNode chamado = null;
+        for (int i = 0; i < 100 && (chamado == null || chamado.isNull()); i++) {
+            Thread.sleep(200);
+            chamado = JSON.readTree(http.get("/api/estado").corpo()).path("estado").path("chamado");
+        }
+        assertEquals("LOGIN", chamado.path("tipo").asText());
+        assertTrue(chamado.path("motivo").asText().contains("será salvo"));
+        portal.digitado = new String[] {"novo@x.com", "senha9"}; // o usuário digita no formulário
+        Thread.sleep(2500); // dá tempo da captura periódica
+        portal.digitado = new String[] {null, null}; // enviou o formulário: os campos sumiram
+        portal.desfechos.clear();
+        http.post("/chamado/continuar", Map.of());
+        for (int i = 0; i < 100; i++) {
+            Thread.sleep(200);
+            if (JSON.readTree(http.get("/api/estado").corpo()).path("estado").path("log").toString().contains("terminei")) break;
+        }
+        assertEquals("enviada", historico().get("https://fake.test/n").status());
+        CredencialRepo.Login salvo = credenciais.ativa("fake").orElseThrow();
+        assertEquals("novo@x.com", salvo.usuario());
+        assertEquals("senha9", salvo.senha());
+        assertTrue(portal.entradas.isEmpty(), "sem login salvo não há login automático");
+    }
+
+    @Test
+    void maxEnviosEncerraASessaoDepoisDoPrimeiroEnvio() throws Exception {
+        portal.vagas = List.of(vaga("p1", "Dev Laravel", "php laravel"), vaga("p2", "Dev Laravel II", "php laravel"),
+                vaga("p3", "Dev Laravel III", "php laravel"));
+        kv.put(KvRepo.CONFIG, "max_envios", "1");
+        try {
+            JsonNode e = rodar();
+            assertEquals(1, e.path("enviadas").asInt());
+            assertEquals(1, portal.tentativas.size(), "as outras vagas não podem ser abertas depois do limite");
+            assertTrue(e.path("log").toString().contains("limite de 1 envio"));
+        } finally {
+            kv.put(KvRepo.CONFIG, "max_envios", "0");
+        }
     }
 
     @Test

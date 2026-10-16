@@ -38,12 +38,13 @@ public class IndeedDriver extends PortalWebDriver {
         String corpo = Texto.normalizar(d.findElement(By.tagName("body")).getText());
         if (corpo.contains("security check") || corpo.contains("just a moment") || corpo.contains("captcha"))
             throw new IllegalStateException("CAPTCHA/verificação no Indeed — resolva na janela do Firefox e inicie de novo");
-        Object r = ((JavascriptExecutor) d).executeScript(
-                "return [...document.querySelectorAll('a.jcs-JobTitle, h2.jobTitle a')].map(a=>{"
-                        + "var c=a.closest('.job_seen_beacon,.cardOutline,li')||a.parentElement;"
-                        + "var e=c.querySelector('[data-testid=company-name]');var l=c.querySelector('[data-testid=text-location]');"
-                        + "return {id:a.getAttribute('data-jk')||'',titulo:a.innerText.trim(),url:a.href,"
-                        + "empresa:e?e.innerText.trim():'',local:l?l.innerText.trim():''};});");
+        if (pedeLoginGoogle(corpo) || menuAcessarVisivel(d)
+                || !d.findElements(By.cssSelector("iframe[src*='accounts.google.com']")).isEmpty())
+            throw new IllegalStateException("LOGIN necessário no Indeed (menu Acessar/modal do Google) — entre na janela do Firefox e responda \"continuar\"");
+        Object r = lerCards(d);
+        if (((List<Object>) r).isEmpty())
+            throw new IllegalStateException("Indeed sem vagas na página · título: " + d.getTitle() + " · url: "
+                    + d.getCurrentUrl() + " · texto: " + corpo.substring(0, Math.min(corpo.length(), 220)));
         List<Vaga> out = new ArrayList<>();
         for (Object o : (List<Object>) r) {
             Map<String, Object> m = (Map<String, Object>) o;
@@ -55,6 +56,39 @@ public class IndeedDriver extends PortalWebDriver {
                     String.valueOf(m.get("local")), "", (LocalDate) null, ""));
         }
         return out;
+    }
+
+    /** A página do Indeed costuma trocar (modal/redirecionamento) logo após carregar: repete a leitura uma vez. */
+    private static Object lerCards(WebDriver d) {
+        try {
+            return lerCardsUmaVez(d);
+        } catch (org.openqa.selenium.StaleElementReferenceException e) {
+            pausa(2000);
+            return lerCardsUmaVez(d);
+        }
+    }
+
+    private static Object lerCardsUmaVez(WebDriver d) {
+        return ((JavascriptExecutor) d).executeScript(
+                "return [...document.querySelectorAll('a.jcs-JobTitle, h2.jobTitle a')].map(a=>{"
+                        + "var c=a.closest('.job_seen_beacon,.cardOutline,li')||a.parentElement;"
+                        + "var e=c.querySelector('[data-testid=company-name]');var l=c.querySelector('[data-testid=text-location]');"
+                        + "return {id:a.getAttribute('data-jk')||'',titulo:a.innerText.trim(),url:a.href,"
+                        + "empresa:e?e.innerText.trim():'',local:l?l.innerText.trim():''};});");
+    }
+
+    /** Sessão deslogada: o Indeed mostra "Acessar" no topo da página (e às vezes um modal "Continuar com o Google"). */
+    static boolean pedeLoginGoogle(String corpoNormalizado) {
+        return corpoNormalizado.contains("continuar com o google") || corpoNormalizado.contains("continue with google")
+                || corpoNormalizado.contains("fazer login com o google") || corpoNormalizado.contains("sign in with google");
+    }
+
+    private static boolean menuAcessarVisivel(WebDriver d) {
+        Object r = ((JavascriptExecutor) d).executeScript(
+                "return [...document.querySelectorAll('header a, header button, nav a, nav button, [data-gnav-element-name] a')]"
+                        + ".some(e=>{var t=(e.innerText||e.getAttribute('aria-label')||'').trim().toLowerCase();"
+                        + "return e.offsetParent!==null&&(t==='acessar'||t==='fazer login'||t==='sign in');});");
+        return Boolean.TRUE.equals(r);
     }
 
     @Override

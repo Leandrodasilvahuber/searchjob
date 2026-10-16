@@ -14,6 +14,7 @@ public class CathoDriver extends PortalWebDriver {
     private static final Pattern LINK = Pattern.compile("<a href=\"(/vagas/[^\"/]+/(\\d+))\"[^>]*>(.*?)</a>", Pattern.DOTALL);
     private static final Pattern EMPRESA = Pattern.compile("<span class=\"text-12\">(.*?)</span>", Pattern.DOTALL);
     private static final Pattern LOCAL = Pattern.compile("</strong>\\s*-\\s*([^<]+)<", Pattern.DOTALL);
+    private static final Pattern JSON_LD = Pattern.compile("<script type=\"application/ld\\+json\">(.*?)</script>", Pattern.DOTALL);
     private static final Pattern DATA = Pattern.compile("Publicada em (\\d{2})/(\\d{2})");
 
     public CathoDriver(NavegadorFirefox navegador, SituacaoService situacoes) {
@@ -28,7 +29,57 @@ public class CathoDriver extends PortalWebDriver {
     @Override
     public List<Vaga> buscar(String termo, int max) throws Exception {
         String slug = URLEncoder.encode(Texto.normalizar(termo).replace(' ', '-'), StandardCharsets.UTF_8);
-        return parse(get("https://www.catho.com.br/vagas/" + slug + "/"), max, LocalDate.now());
+        // a Catho devolve vagas sem relação com o termo: o card casando basta; senão lê a descrição completa da vaga
+        List<Vaga> out = new ArrayList<>();
+        for (Vaga v : parse(get("https://www.catho.com.br/vagas/" + slug + "/"), Integer.MAX_VALUE, LocalDate.now())) {
+            if (out.size() >= max) break;
+            if (mencionaTermo(v.cargo() + " " + v.descricao(), termo) || mencionaTermo(descricaoCompleta(v.url()), termo))
+                out.add(v);
+        }
+        return out;
+    }
+
+    /** Descrição completa vem no JSON-LD (JobPosting) da página da vaga; falha de rede conta como "sem descrição". */
+    private String descricaoCompleta(String url) {
+        try {
+            pausa(300);
+            return descricaoDoJsonLd(get(url));
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    static String descricaoDoJsonLd(String html) {
+        Matcher m = JSON_LD.matcher(html);
+        while (m.find()) {
+            try {
+                var no = new com.fasterxml.jackson.databind.ObjectMapper().readTree(m.group(1));
+                if ("JobPosting".equals(no.path("@type").asText())) return no.path("description").asText("");
+            } catch (Exception ignored) {
+                // bloco JSON-LD de outro tipo ou malformado: tenta o próximo
+            }
+        }
+        return "";
+    }
+
+    /**
+     * Cada palavra do termo original (".net", "c#") precisa aparecer inteira no título/card. A borda só é exigida
+     * onde o termo começa/termina em letra ou dígito: ".net" casa em "Desenvolvedor.NET", mas "c#" não casa em "Categoria C".
+     */
+    static boolean mencionaTermo(String texto, String termo) {
+        String alvo = semAcento(texto);
+        for (String palavra : semAcento(termo).strip().split("\\s+")) {
+            if (palavra.isEmpty()) continue;
+            String antes = Character.isLetterOrDigit(palavra.codePointAt(0)) ? "(?<![\\p{L}\\p{N}])" : "";
+            String depois = Character.isLetterOrDigit(palavra.codePointBefore(palavra.length())) ? "(?![\\p{L}\\p{N}])" : "";
+            if (!Pattern.compile(antes + Pattern.quote(palavra) + depois).matcher(alvo).find()) return false;
+        }
+        return true;
+    }
+
+    private static String semAcento(String s) {
+        return java.text.Normalizer.normalize(s == null ? "" : s, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "").toLowerCase();
     }
 
     static List<Vaga> parse(String html, int max, LocalDate hoje) {
@@ -64,7 +115,12 @@ public class CathoDriver extends PortalWebDriver {
     }
 
     @Override
+    protected String[] textosJaCandidatou() {
+        return new String[] {"voce ja se candidatou", "candidatura ja enviada", "ja se candidatou", "cv enviado"};
+    }
+
+    @Override
     protected String[] textosSucesso() {
-        return new String[] {"candidatura enviada", "curriculo enviado", "voce se candidatou", "candidatura realizada"};
+        return new String[] {"candidatura enviada", "curriculo enviado", "cv enviado", "voce se candidatou", "candidatura realizada"};
     }
 }

@@ -102,12 +102,13 @@ public class MdImporter {
         padrao(KvRepo.PREF, "excluir_titulos", "estagio,estagiario,estagiaria,jovem aprendiz,banco de talentos");
         padrao(KvRepo.PREF, "exige_ingles_oral", "calls em ingles,reunioes em ingles,entrevista em ingles,fluencia oral,conversacao em ingles,ingles conversacional,spoken english,english speaking");
         padrao(KvRepo.CONFIG, "modo", "codigo");
-        padrao(KvRepo.CONFIG, "portais", "gupy,programathor,catho,indeed");
+        padrao(KvRepo.CONFIG, "portais", "gupy,linkedin,indeed,catho,programathor");
         padrao(KvRepo.CONFIG, "dry_run", "true");
-        padrao(KvRepo.CONFIG, "zai_url", "https://api.z.ai/api/paas/v4/chat/completions");
-        padrao(KvRepo.CONFIG, "zai_modelo", "glm-4.6");
-        padrao(KvRepo.CONFIG, "zai_chave", "");
+        padrao(KvRepo.CONFIG, "openrouter_url", "https://openrouter.ai/api/v1/chat/completions");
+        padrao(KvRepo.CONFIG, "openrouter_modelos", "openai/gpt-oss-20b,mistralai/mistral-nemo,qwen/qwen3.7-flash,nvidia/nemotron-3-super-120b-a12b:free");
+        padrao(KvRepo.CONFIG, "openrouter_chave", "");
         padrao(KvRepo.CONFIG, "max_vagas", "30");
+        padrao(KvRepo.CONFIG, "nao_interagir", "false");
     }
 
     private void padrao(String tabela, String chave, String valor) {

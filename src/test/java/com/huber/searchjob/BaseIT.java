@@ -21,5 +21,6 @@ public abstract class BaseIT {
     static void props(DynamicPropertyRegistry r) {
         r.add("spring.datasource.url", () -> "jdbc:sqlite:" + DB);
         r.add("searchjob.pasta-origem", () -> "/nao/existe");
+        r.add("searchjob.cofre-chave", () -> DB + ".key");
     }
 }

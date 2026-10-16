@@ -1,7 +1,7 @@
 # SearchJob
 
 Automação de candidaturas a vagas com tela web local. Substitui o loop de LLM da skill `busca-emprego`:
-o **código** faz o trabalho repetitivo (buscar, filtrar, escolher o CV, preencher, enviar, registrar) e a **z.ai (GLM)**
+o **código** faz o trabalho repetitivo (buscar, filtrar, escolher o CV, preencher, enviar, registrar) e a **IA (OpenRouter, modelos free)**
 só entra quando precisa de julgamento: pergunta nova, texto livre, CV indefinido ou, se você ligar, avaliar a vaga.
 
 - Spring Boot 3.3 · Java 17 · SQLite · Thymeleaf · Selenium (Firefox)
@@ -43,7 +43,7 @@ verdade: o que você apagar na tela não volta. Para reimportar, apague a chave 
 
 ### Primeiro uso, passo a passo
 
-1. Abra **Configuração** e preencha `zai_chave` (confira `zai_url` e `zai_modelo`). Sem a chave, o sistema funciona, mas
+1. Abra **Configuração** e preencha `openrouter_chave` (confira `openrouter_url` e `openrouter_modelos`). Sem a chave, o sistema funciona, mas
    toda pergunta sem regra espera por você e não há textos sob medida.
 2. No **Painel**, deixe o **dry-run ligado** (é o padrão) e `max_vagas` pequeno (3 a 5).
 3. Clique em **▶ Iniciar busca**. O sistema abre o Firefox do robô (perfil próprio em `data/firefox-profile`). Faça login
@@ -166,9 +166,9 @@ Os filtros comparam **palavra inteira** (`.net` não pega "Kubernetes"; "inglês
 | `portais` | gupy,programathor,catho,indeed | Portais ativos; nome desconhecido é ignorado com aviso |
 | `dry_run` | true | Preenche sem enviar. **Lido no início da sessão.** |
 | `max_vagas` | 30 | Vagas listadas **por portal e por termo** (não é limite de candidaturas) |
-| `zai_chave` | vazio | Chave da z.ai. Nunca é exibida; salvar em branco mantém a atual |
-| `zai_url` | https://api.z.ai/api/paas/v4/chat/completions | Endpoint compatível com OpenAI |
-| `zai_modelo` | glm-4.6 | Modelo (valores de partida; confirme na sua conta) |
+| `openrouter_chave` | vazio | Chave do OpenRouter. Nunca é exibida; salvar em branco mantém a atual |
+| `openrouter_url` | https://openrouter.ai/api/v1/chat/completions | Endpoint compatível com OpenAI |
+| `openrouter_modelos` | nemotron-3-super-120b, laguna-xs-2.1, gemma-4-31b-it (todos `:free`) | Lista separada por vírgula; tenta em ordem (fallback) |
 | `md_importado` | — | Marca que a importação inicial já ocorreu |
 
 Valores numéricos inválidos caem no padrão, sem derrubar a sessão.
@@ -198,6 +198,14 @@ Tocam em fila, um por vez, com o volume do stream em 300% (o do sistema é o que
 | Login ou CAPTCHA | `phone-incoming-call` |
 | Fim da sessão (não toca se você parou) | `alarm-clock-elapsed` |
 
+## Login automático
+
+Quando o portal pede login durante a busca, o robô entra sozinho com a conta **ativa** do portal (tela *Credenciais*) e
+segue até o fim. Sem login salvo, ele chama você, **captura o que você digita** no formulário do Firefox do robô e salva
+no cofre; nas próximas vezes entra sozinho. Se a senha salva falhar (2 tentativas por vaga), chama você de novo e salva o
+login novo. CAPTCHA e verificação em duas etapas sempre chamam você. Funciona para formulário com usuário e senha na mesma
+página ou em duas etapas (`LoginAutomatico`).
+
 ## Segurança
 
 O app guarda CPF, nome da mãe, CVs e a chave da z.ai, e pode enviar candidaturas. Por isso:
@@ -207,7 +215,10 @@ O app guarda CPF, nome da mãe, CVs e a chave da z.ai, e pode enviar candidatura
   loopback em todo POST (barra CSRF vindo de outros sites abertos no navegador).
 - A chave da z.ai nunca é renderizada na página.
 - Não é autenticação: **qualquer processo na sua máquina** ainda acessa o app.
-- Dados sensíveis (RG, pai, senha, banco) nunca vão à z.ai e sempre chamam você.
+- Dados sensíveis (RG, pai, banco) nunca vão à z.ai e sempre chamam você.
+- **Credenciais dos portais** (tela *Credenciais*): senha cifrada com AES-256-GCM no SQLite; a chave fica em
+  `data/cofre.key` (permissão 600), separada do banco. A senha nunca aparece na tela nem vai à z.ai. Quem já tem acesso
+  à sua conta de usuário na máquina consegue ler a chave: não é proteção contra isso.
 - `data/` (banco, perfil do Firefox, logs) está no `.gitignore`.
 
 ## Dados e banco

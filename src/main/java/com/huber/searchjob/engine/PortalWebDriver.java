@@ -6,6 +6,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import org.openqa.selenium.By;
@@ -43,6 +45,11 @@ public abstract class PortalWebDriver implements PortalDriver {
         return new String[] {"voce ja se candidatou", "candidatura ja enviada", "ja se candidatou"};
     }
 
+    /** Trechos (sem acento, minúsculos) com que o portal avisa que esta conta não pode se candidatar à vaga. */
+    protected String[] textosBloqueio() {
+        return new String[0];
+    }
+
     /** Ponto de extensão para casos próprios do portal (ex.: vaga externa). */
     protected Optional<Desfecho> casoEspecial(WebDriver d, String corpoNormalizado) {
         return Optional.empty();
@@ -59,17 +66,58 @@ public abstract class PortalWebDriver implements PortalDriver {
     }
 
     @Override
+    public boolean pedeCaptcha() {
+        return LoginAutomatico.pedeCaptcha(navegador.driver());
+    }
+
+    @Override
+    public String diagnostico() {
+        return LoginAutomatico.diagnostico(navegador.driver());
+    }
+
+    @Override
+    public String[] lerLogin() {
+        return LoginAutomatico.ler(navegador.driver());
+    }
+
+    @Override
+    public boolean entrar(String usuario, String senha) {
+        return LoginAutomatico.entrar(navegador.driver(), usuario, senha);
+    }
+
+    @Override
     public Desfecho candidatar(Vaga vaga, Cv cv, boolean dryRun, BooleanSupplier continuar) {
+        try {
+            return fluxo(vaga, cv, dryRun, continuar);
+        } catch (org.openqa.selenium.UnhandledAlertException e) {
+            // ex.: "você será redirecionado ao sistema de seleção da empresa": vaga externa, não candidata por aqui
+            String aviso = e.getAlertText() == null ? "" : e.getAlertText().strip();
+            return new Desfecho(Status.PULADA, "vaga externa (candidatura fora do portal)"
+                    + (aviso.isEmpty() ? "" : ": " + (aviso.length() > 120 ? aviso.substring(0, 120) : aviso)));
+        }
+    }
+
+    private Desfecho fluxo(Vaga vaga, Cv cv, boolean dryRun, BooleanSupplier continuar) {
         WebDriver d = navegador.driver();
         d.get(vaga.url());
         pausa(2500);
         String contexto = vaga.empresa() + " — " + vaga.cargo() + "\n" + vaga.descricao();
+        String anterior = null;
+        int parados = 0;
         for (int passo = 0; passo < 20 && continuar.getAsBoolean(); passo++) {
             String corpo = Texto.normalizar(d.findElement(By.tagName("body")).getText());
+            if (passo == 0) // ao abrir a vaga, qualquer aviso de candidatura existente é de antes desta execução
+                for (String s : textosJaCandidatou())
+                    if (corpo.contains(s)) return new Desfecho(Status.PULADA, "já candidatada nesta conta");
             for (String s : textosSucesso())
                 if (corpo.contains(s)) return new Desfecho(Status.ENVIADA, s);
             for (String s : textosJaCandidatou())
                 if (corpo.contains(s)) return new Desfecho(Status.PULADA, "já candidatada nesta conta");
+            for (String s : textosBloqueio()) {
+                int i = corpo.indexOf(s);
+                if (i >= 0) return new Desfecho(Status.PULADA, "portal não permite a candidatura: "
+                        + corpo.substring(i, Math.min(corpo.length(), i + 100)));
+            }
             if (corpo.contains("captcha") || corpo.contains("security check") || corpo.contains("just a moment")
                     || corpo.contains("verifique que voce e humano") || corpo.contains("verificacao de seguranca"))
                 return new Desfecho(Status.PRECISA_USUARIO, "CAPTCHA/verificação em " + nome());
@@ -83,13 +131,24 @@ public abstract class PortalWebDriver implements PortalDriver {
 
             WebElement envio = achar(d, botoesEnvio());
             WebElement botao = envio != null ? envio : achar(d, botoesAvanco());
-            if (botao == null) return new Desfecho(Status.ERRO, "nenhum botão de avanço/envio encontrado (passo " + passo + ")");
+            if (botao == null)
+                return new Desfecho(Status.ERRO, "nenhum botão de avanço/envio encontrado (passo " + passo + ") · "
+                        + LoginAutomatico.diagnostico(d) + " · botões visíveis: " + botoesVisiveis(d));
             if (envio != null && dryRun)
                 return new Desfecho(Status.PRONTA_DRY_RUN, "dry-run: formulário pronto, não enviado");
-            ((JavascriptExecutor) d).executeScript("arguments[0].click()", botao);
+            // botão no rodapé de um modal pode estar fora da área visível: rola até ele antes de clicar
+            ((JavascriptExecutor) d).executeScript(
+                    "arguments[0].scrollIntoView({block:'center'});arguments[0].click()", botao);
             pausa(2500);
+            String assinatura = d.getCurrentUrl() + "|" + d.findElement(By.tagName("body")).getText().hashCode();
+            parados = assinatura.equals(anterior) ? parados + 1 : 0;
+            anterior = assinatura;
+            if (parados >= 3)
+                return new Desfecho(Status.ERRO, "sem progresso: o botão não avança (campo obrigatório sem resposta?) · "
+                        + LoginAutomatico.diagnostico(d) + " · botões visíveis: " + botoesVisiveis(d) + " · texto: "
+                        + resumo(d));
         }
-        return new Desfecho(Status.ERRO, "fluxo não terminou em 20 passos");
+        return new Desfecho(Status.ERRO, "fluxo não terminou em 20 passos · " + resumo(d));
     }
 
     private Desfecho preencherCampos(WebDriver d, String contexto, Cv cv, BooleanSupplier continuar) {
@@ -131,17 +190,41 @@ public abstract class PortalWebDriver implements PortalDriver {
         return o == null ? "" : o.toString().trim();
     }
 
+    /** Fim do texto da página, para diagnosticar onde o fluxo travou. */
+    private static String resumo(WebDriver d) {
+        String t = d.findElement(By.tagName("body")).getText().replaceAll("\\s+", " ");
+        return t.length() > 300 ? t.substring(t.length() - 300) : t;
+    }
+
+    /** Textos dos botões/links de ação visíveis, para diagnosticar uma página que o robô não entendeu. */
+    private static String botoesVisiveis(WebDriver d) {
+        List<String> out = new ArrayList<>();
+        for (WebElement b : d.findElements(By.cssSelector("button,a.btn,input[type=submit],[role=button]"))) {
+            try {
+                String t = b.getText().trim();
+                if (b.isDisplayed() && !t.isEmpty() && out.size() < 12) out.add(t.length() > 40 ? t.substring(0, 40) : t);
+            } catch (org.openqa.selenium.WebDriverException ignored) {
+                // elemento trocado durante a leitura
+            }
+        }
+        return out.toString();
+    }
+
+    /**
+     * Primeiro botão visível e habilitado cujo texto bate com um dos alvos (na ordem dada). Lê o texto de todos os
+     * botões numa única chamada ao navegador: um getText por elemento fica lento demais em páginas com centenas de botões.
+     */
+    @SuppressWarnings("unchecked")
     private static WebElement achar(WebDriver d, String[] textos) {
+        List<WebElement> botoes = d.findElements(By.cssSelector("button,a.btn,input[type=submit],[role=button]"));
+        List<Object> rotulos = (List<Object>) ((JavascriptExecutor) d).executeScript(
+                "return arguments[0].map(function(e){var r=e.offsetParent===null||e.disabled?null:"
+                        + "(e.innerText||e.getAttribute('aria-label')||e.value||'');return r;});", botoes);
         for (String t : textos) {
             String alvo = Texto.normalizar(t);
-            for (WebElement b : d.findElements(By.cssSelector("button,a.btn,input[type=submit],[role=button]"))) {
-                try {
-                    String rot = b.getText();
-                    if (rot == null || rot.isBlank()) rot = b.getAttribute("aria-label") == null ? b.getAttribute("value") : b.getAttribute("aria-label");
-                    if (b.isDisplayed() && b.isEnabled() && rot != null && Texto.normalizar(rot).equals(alvo)) return b;
-                } catch (org.openqa.selenium.StaleElementReferenceException ignored) {
-                    // elemento trocado durante a leitura: segue para o próximo
-                }
+            for (int i = 0; i < botoes.size() && i < rotulos.size(); i++) {
+                Object rot = rotulos.get(i);
+                if (rot != null && Texto.normalizar(rot.toString()).equals(alvo)) return botoes.get(i);
             }
         }
         return null;

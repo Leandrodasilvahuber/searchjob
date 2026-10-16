@@ -3,6 +3,7 @@ package com.huber.searchjob.engine;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.huber.searchjob.db.CandidaturaRepo;
 import com.huber.searchjob.db.Cv;
+import com.huber.searchjob.db.CredencialRepo;
 import com.huber.searchjob.db.CvRepo;
 import com.huber.searchjob.db.KvRepo;
 import java.time.LocalDate;
@@ -14,6 +15,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Service;
 
@@ -30,6 +33,14 @@ public class Orquestrador {
     private final CvContexto cvContexto;
     private final Aviso aviso;
     private final FabricaDrivers fabrica;
+    private final CredencialRepo credenciais;
+
+    /** Pedido de ajuda que pausa a sessão: {@code tipo} é LOGIN (login/CAPTCHA) ou PENDENCIA (pergunta sem resposta). */
+    public record Chamado(String tipo, String portal, String vaga, String motivo) {}
+
+    private static final long BIP_A_CADA_MS = 10_000;
+    private volatile Chamado chamado;
+    private final LinkedBlockingQueue<String> decisoes = new LinkedBlockingQueue<>();
 
     private volatile boolean rodando;
     private volatile String mensagem = "parado";
@@ -37,14 +48,15 @@ public class Orquestrador {
     private final AtomicInteger enviadas = new AtomicInteger();
     private final AtomicInteger puladas = new AtomicInteger();
     private final AtomicInteger erros = new AtomicInteger();
-    private final Deque<String> log = new ArrayDeque<>();
+    private final Deque<Evento> log = new ArrayDeque<>();
     private Thread thread;
     private final Set<String> bloqueados = new HashSet<>();
 
     public Orquestrador(KvRepo kv, CandidaturaRepo candidaturas, CvRepo cvs, FiltroVaga filtro, EscolhaCv escolhaCv,
                         SituacaoService situacoes, ZaiClient zai, CvContexto cvContexto, Aviso aviso,
-                        FabricaDrivers fabrica) {
+                        FabricaDrivers fabrica, CredencialRepo credenciais) {
         this.fabrica = fabrica;
+        this.credenciais = credenciais;
         this.kv = kv;
         this.candidaturas = candidaturas;
         this.cvs = cvs;
@@ -57,10 +69,106 @@ public class Orquestrador {
     }
 
     public record Estado(boolean rodando, String mensagem, int processadas, int enviadas, int puladas, int erros,
-                         List<String> log) {}
+                         List<Evento> log, Chamado chamado) {}
+
+    /** Linha do log: tipo = info|encontrada|aberta|preenchida|enviada|aguardando|pulada|erro. */
+    public record Evento(String hora, String tipo, String texto, String detalhe) {}
 
     public synchronized Estado estado() {
-        return new Estado(rodando, mensagem, processadas.get(), enviadas.get(), puladas.get(), erros.get(), new ArrayList<>(log));
+        return new Estado(rodando, mensagem, processadas.get(), enviadas.get(), puladas.get(), erros.get(),
+                new ArrayList<>(log), chamado);
+    }
+
+    /** Decisão do usuário para o chamado aberto: "continuar" (já logou/resolveu) ou "pular". */
+    public void decidir(String decisao) {
+        if (chamado != null && ("continuar".equals(decisao) || "pular".equals(decisao))) decisoes.offer(decisao);
+    }
+
+    /**
+     * Pausa a sessão até o usuário decidir, repetindo o bip a cada 10 s. O bip só para quando o usuário clica em Resolvido ou Pular. Devolve "continuar" ou "pular" ("pular" se a sessão for parada).
+     */
+    private String aguardar(Chamado c) {
+        return aguardar(c, () -> { });
+    }
+
+    /** Igual a {@link #aguardar(Chamado)}, mas chama {@code aCadaSegundo} enquanto espera (ex.: capturar o login digitado). */
+    private String aguardar(Chamado c, Runnable aCadaSegundo) {
+        if (!c.tipo().equals("LOGIN") && kv.booleano(KvRepo.CONFIG, "nao_interagir", false)) {
+            registrar("não interagir: pulando sem chamar você (" + c.motivo() + ")");
+            return "pular";
+        }
+        decisoes.clear();
+        chamado = c;
+        registrar("aguardando", "vaga aguardando intervenção: " + (c.tipo().equals("LOGIN")
+                ? "faça login em " + c.portal() : "pendência em " + c.portal()) + " (" + c.motivo() + ")", c.tipo());
+        long ultimoBip = 0;
+        try {
+            while (rodando) {
+                long agora = System.currentTimeMillis();
+                if (agora - ultimoBip >= BIP_A_CADA_MS) {
+                    ultimoBip = agora;
+                    if (c.tipo().equals("LOGIN")) aviso.login();
+                    else aviso.chamarUsuario();
+                }
+                String d = decisoes.poll(1, TimeUnit.SECONDS);
+                if (d != null) return d;
+                aCadaSegundo.run();
+            }
+            return "pular";
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "pular";
+        } finally {
+            chamado = null;
+        }
+    }
+
+    /** Guarda o último valor não vazio de cada campo (em logins de duas etapas, usuário e senha aparecem em páginas diferentes). */
+    private static void acumular(String[] digitado, String[] lido) {
+        for (int i = 0; i < 2; i++) if (lido[i] != null) digitado[i] = lido[i];
+    }
+
+    private void salvarLoginDigitado(String portal, String[] digitado) {
+        if (digitado[0] == null || digitado[1] == null) return;
+        try {
+            credenciais.salvar(portal, digitado[0], digitado[1]);
+            registrar("login de " + portal + " salvo (" + digitado[0] + ") — das próximas vezes entro sozinho");
+        } catch (RuntimeException e) {
+            registrar("não consegui salvar o login de " + portal + ": " + e.getMessage());
+        }
+    }
+
+    private static boolean pedeLogin(String motivo) {
+        return motivo.contains("login") && !motivo.toLowerCase().contains("captcha");
+    }
+
+    /** Usa o login ativo do portal no cofre. Devolve true se preencheu e enviou o formulário. */
+    private boolean entrarAutomatico(PortalDriver driver) {
+        Optional<CredencialRepo.Login> login;
+        try {
+            login = credenciais.ativa(driver.nome());
+        } catch (RuntimeException e) {
+            registrar("login salvo de " + driver.nome() + " ilegível: " + e.getMessage());
+            return false;
+        }
+        if (login.isEmpty()) {
+            registrar("sem login salvo para " + driver.nome() + " — cadastre em Credenciais para entrar sozinho");
+            return false;
+        }
+        try {
+            registrar("entrando em " + driver.nome() + " com " + login.get().usuario());
+            boolean enviou = driver.entrar(login.get().usuario(), login.get().senha());
+            registrar(enviou ? "login enviado em " + driver.nome() + " — " + driver.diagnostico()
+                    : "não achei formulário de login em " + driver.nome() + " — " + driver.diagnostico());
+            return enviou;
+        } catch (RuntimeException e) {
+            registrar("login automático em " + driver.nome() + " falhou: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private static boolean ehLogin(String motivo) {
+        return motivo.contains("login") || motivo.toLowerCase().contains("captcha");
     }
 
     public synchronized void iniciar() {
@@ -80,6 +188,10 @@ public class Orquestrador {
         thread.start();
     }
 
+    public synchronized void limparLog() {
+        log.clear();
+    }
+
     public synchronized void parar() {
         rodando = false;
         mensagem = "parando…";
@@ -96,8 +208,12 @@ public class Orquestrador {
     }
 
     private void registrar(String linha) {
+        registrar("info", linha, null);
+    }
+
+    private void registrar(String tipo, String linha, String detalhe) {
         synchronized (this) {
-            log.addFirst(java.time.LocalTime.now().withNano(0) + " " + linha);
+            log.addFirst(new Evento(java.time.LocalTime.now().withNano(0).toString(), tipo, linha, detalhe));
             while (log.size() > 80) log.removeLast();
             mensagem = linha;
         }
@@ -129,23 +245,39 @@ public class Orquestrador {
                 for (String termo : kv.get(KvRepo.PREF, "termos", "").split(",")) {
                     if (!rodando || termo.isBlank() || bloqueados.contains(driver.nome())) continue;
                     registrar(driver.nome() + ": buscando \"" + termo.trim() + "\"");
-                    List<Vaga> vagas;
-                    try {
-                        vagas = driver.buscar(termo.trim(), max);
-                    } catch (Exception e) {
-                        registrar("erro na busca (" + driver.nome() + "): " + e.getMessage());
-                        if (e.getMessage() != null && e.getMessage().contains("CAPTCHA")) {
-                            bloqueados.add(driver.nome());
-                            aviso.login();
+                    List<Vaga> vagas = null;
+                    while (vagas == null) {
+                        try {
+                            vagas = driver.buscar(termo.trim(), max);
+                        } catch (Exception e) {
+                            registrar("erro na busca (" + driver.nome() + "): " + e.getMessage());
+                            if (e.getMessage() == null || !(e.getMessage().contains("CAPTCHA") || e.getMessage().contains("LOGIN necessário"))) break;
+                            if ("pular".equals(aguardar(new Chamado("LOGIN", driver.nome(), "busca", e.getMessage())))) {
+                                bloqueados.add(driver.nome());
+                                break;
+                            }
                         }
-                        continue;
                     }
+                    if (vagas == null) continue;
+                    if (vagas.isEmpty()) registrar(driver.nome() + ": nenhuma vaga para \"" + termo.trim()
+                            + "\" (o portal pode não ter essa categoria)");
+                    int jaFeitas = 0;
                     for (Vaga v : vagas) {
                         if (!rodando || bloqueados.contains(driver.nome())) break;
                         String chave = ChaveVaga.de(v.url());
-                        if (!vistas.add(chave) || feitas.contains(chave)) continue;
+                        if (!vistas.add(chave) || feitas.contains(chave)) {
+                            jaFeitas++;
+                            continue;
+                        }
                         processar(driver, v, zaiAvalia, dryRun);
+                        int maxEnvios = kv.inteiro(KvRepo.CONFIG, "max_envios", 0);
+                        if (maxEnvios > 0 && enviadas.get() >= maxEnvios) {
+                            registrar("limite de " + maxEnvios + " envio(s) atingido — encerrando a sessão");
+                            rodando = false;
+                        }
                     }
+                    if (jaFeitas > 0) registrar(driver.nome() + ": " + jaFeitas + " de " + vagas.size()
+                            + " vaga(s) de \"" + termo.trim() + "\" já estavam no histórico e foram ignoradas");
                 }
             }
             registrar("✨ terminei — " + processadas.get() + " processadas · " + enviadas.get() + " enviadas · "
@@ -163,12 +295,13 @@ public class Orquestrador {
     private void processar(PortalDriver driver, Vaga v, boolean zaiAvalia, boolean dryRun) {
         processadas.incrementAndGet();
         String rotulo = v.empresa() + " — " + v.cargo();
+        registrar("encontrada", "vaga encontrada: " + rotulo, null);
         Optional<String> descarte = filtro.motivoDescarte(v, LocalDate.now());
         if (descarte.isPresent()) {
             candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", descarte.get());
             puladas.incrementAndGet();
             aviso.pulada();
-            registrar("pulada: " + rotulo + " (" + descarte.get() + ")");
+            registrar("pulada", "vaga pulada: " + rotulo + " (" + descarte.get() + ")", null);
             return;
         }
         Optional<EscolhaCv.Escolha> escolha = escolhaCv.escolherDefinido(v);
@@ -195,7 +328,7 @@ public class Orquestrador {
                     candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", motivo);
                     puladas.incrementAndGet();
                     aviso.pulada();
-                    registrar("pulada: " + rotulo + " (" + motivo + ")");
+                    registrar("pulada", "vaga pulada: " + rotulo + " (" + motivo + ")", null);
                     return;
                 }
                 String nomeCv = r.path("cv").asText("");
@@ -213,13 +346,61 @@ public class Orquestrador {
             return;
         }
         long id = candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), cv.get().nome(), "pendente", "em andamento");
-        registrar("candidatando: " + rotulo + " · CV " + cv.get().nome());
+        registrar("aberta", "vaga aberta: " + rotulo + " · CV " + cv.get().nome(), null);
         // uma tentativa por rodada: repetir depois de um clique em "enviar" poderia candidatar duas vezes
         PortalDriver.Desfecho d;
-        try {
-            d = driver.candidatar(v, cv.get(), dryRun, () -> rodando);
-        } catch (Exception e) {
-            d = new PortalDriver.Desfecho(PortalDriver.Status.ERRO, String.valueOf(e.getMessage()));
+        boolean pulouChamado = false;
+        int tentativasLogin = 0;
+        while (true) {
+            try {
+                d = driver.candidatar(v, cv.get(), dryRun, () -> rodando);
+            } catch (Exception e) {
+                d = new PortalDriver.Desfecho(PortalDriver.Status.ERRO, String.valueOf(e.getMessage()));
+            }
+            if (d.status() != PortalDriver.Status.PRECISA_USUARIO || !rodando) break;
+            // login pedido no meio da busca: entra sozinho com o login salvo (até 2 tentativas por vaga)
+            boolean captchaNoLogin = false;
+            if (pedeLogin(d.motivo()) && tentativasLogin < 2 && entrarAutomatico(driver)) {
+                tentativasLogin++;
+                captchaNoLogin = driver.pedeCaptcha();
+                if (!captchaNoLogin) continue;
+                registrar(driver.nome() + " exige CAPTCHA no login — o login automático não adianta");
+            }
+            candidaturas.atualizarStatus(id, "aguardando_usuario", d.motivo());
+            boolean login = pedeLogin(d.motivo());
+            String tipo = ehLogin(d.motivo()) ? "LOGIN" : "PENDENCIA";
+            String motivo = d.motivo();
+            if (login) {
+                motivo += captchaNoLogin
+                        ? " — o portal exige CAPTCHA: resolva e entre manualmente (marque \"lembrar-me\" para a sessão durar)"
+                        : tentativasLogin > 0
+                        ? " — o login automático não funcionou; entre manualmente (o novo login será salvo)"
+                        : " — entre manualmente; o login digitado será salvo para entrar sozinho nas próximas vezes";
+            }
+            String[] digitado = {null, null};
+            Runnable capturar = login ? () -> acumular(digitado, driver.lerLogin()) : () -> { };
+            String decisao = aguardar(new Chamado(tipo, driver.nome(), rotulo, motivo), capturar);
+            if (login && "continuar".equals(decisao)) salvarLoginDigitado(driver.nome(), digitado);
+            if ("pular".equals(decisao)) {
+                pulouChamado = true;
+                break;
+            }
+            registrar("retomando: " + rotulo);
+        }
+        if (pulouChamado) {
+            if (ehLogin(d.motivo())) {
+                bloqueados.add(driver.nome());
+                registrar(driver.nome() + " pulado nesta rodada");
+                candidaturas.atualizarStatus(id, "aguardando_usuario", d.motivo());
+            } else {
+                candidaturas.atualizarStatus(id, "pulada",
+                        (kv.booleano(KvRepo.CONFIG, "nao_interagir", false) ? "pulada (não interagir): "
+                                : "pulada pelo usuário: ") + d.motivo());
+                puladas.incrementAndGet();
+                aviso.pulada();
+                registrar("pulada", "vaga pulada: " + rotulo + " (" + d.motivo() + ")", null);
+            }
+            return;
         }
         if (!rodando && d.status() == PortalDriver.Status.ERRO) {
             candidaturas.atualizarStatus(id, "pendente", "sessão parada");
@@ -230,33 +411,28 @@ public class Orquestrador {
                 candidaturas.atualizarStatus(id, "enviada", d.motivo());
                 enviadas.incrementAndGet();
                 aviso.enviada();
-                registrar("enviada: " + rotulo);
+                registrar("preenchida", "vaga preenchida: " + rotulo, null);
+                registrar("enviada", "vaga enviada com sucesso: " + rotulo, null);
             }
             case PRONTA_DRY_RUN -> {
                 candidaturas.atualizarStatus(id, "dry_run", d.motivo());
-                registrar("pronta (dry-run): " + rotulo);
+                registrar("preenchida", "vaga preenchida (dry-run, não enviada): " + rotulo, null);
             }
             case PRECISA_USUARIO -> {
                 candidaturas.atualizarStatus(id, "aguardando_usuario", d.motivo());
-                if (d.motivo().contains("login") || d.motivo().toLowerCase().contains("captcha")) aviso.login();
-                else aviso.chamarUsuario();
+                // só chega aqui se a sessão foi parada durante o chamado
                 registrar("preciso de você: " + rotulo + " (" + d.motivo() + ")");
-                if (d.motivo().contains("login") || d.motivo().toLowerCase().contains("captcha")) {
-                    // só este portal fica de fora; os demais seguem. Logue na janela do Firefox e inicie de novo.
-                    bloqueados.add(driver.nome());
-                    registrar(driver.nome() + " pulado nesta rodada até você logar");
-                }
             }
             case PULADA -> {
                 candidaturas.atualizarStatus(id, "pulada", d.motivo());
                 puladas.incrementAndGet();
                 aviso.pulada();
-                registrar("pulada: " + rotulo + " (" + d.motivo() + ")");
+                registrar("pulada", "vaga pulada: " + rotulo + " (" + d.motivo() + ")", null);
             }
             default -> {
                 candidaturas.atualizarStatus(id, "erro", d.motivo());
                 erros.incrementAndGet();
-                registrar("erro: " + rotulo + " (" + d.motivo() + ")");
+                registrar("erro", "erro ao enviar: " + rotulo, d.motivo());
             }
         }
     }

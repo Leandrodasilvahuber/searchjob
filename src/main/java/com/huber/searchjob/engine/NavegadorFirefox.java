@@ -18,6 +18,7 @@ public class NavegadorFirefox {
             try {
                 Path perfil = Path.of(System.getProperty("searchjob.firefox-profile", "data/firefox-profile")).toAbsolutePath();
                 Files.createDirectories(perfil);
+                apontarGeckodriver();
                 FirefoxOptions o = new FirefoxOptions();
                 String binario = binarioFirefox();
                 if (binario != null) o.setBinary(binario);
@@ -40,6 +41,23 @@ public class NavegadorFirefox {
         if (forcado != null && !forcado.isBlank()) return forcado;
         Path snap = Path.of("/snap/firefox/current/usr/lib/firefox/firefox");
         return Files.isExecutable(snap) ? snap.toString() : null;
+    }
+
+    /**
+     * Usa o geckodriver do PATH (pré-requisito do README). Sem isso o Selenium Manager tenta baixar o Firefox
+     * e registra um aviso 404 em ftp.mozilla.org. Pode ser forçado com -Dwebdriver.gecko.driver.
+     */
+    static void apontarGeckodriver() {
+        if (System.getProperty("webdriver.gecko.driver") != null) return;
+        String path = System.getenv("PATH");
+        if (path == null) return;
+        for (String dir : path.split(java.io.File.pathSeparator)) {
+            Path g = Path.of(dir, "geckodriver");
+            if (Files.isExecutable(g)) {
+                System.setProperty("webdriver.gecko.driver", g.toString());
+                return;
+            }
+        }
     }
 
     public synchronized void fechar() {

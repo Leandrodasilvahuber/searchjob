@@ -26,7 +26,7 @@ import org.openqa.selenium.WebElement;
  */
 public class GupyDriver implements PortalDriver {
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final String[] BOTOES = {"Continuar", "Salvar e continuar", "Responder agora", "Próximo", "Finalizar candidatura"};
+    private static final String[] BOTOES = {"Finalizar candidatura", "Continuar", "Salvar e continuar", "Responder agora", "Próximo"};
 
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
     private final NavegadorFirefox navegador;
@@ -40,6 +40,46 @@ public class GupyDriver implements PortalDriver {
     @Override
     public String nome() {
         return "Gupy";
+    }
+
+    @Override
+    public boolean pedeCaptcha() {
+        return LoginAutomatico.pedeCaptcha(navegador.driver());
+    }
+
+    @Override
+    public String diagnostico() {
+        return LoginAutomatico.diagnostico(navegador.driver());
+    }
+
+    @Override
+    public String[] lerLogin() {
+        return LoginAutomatico.ler(navegador.driver());
+    }
+
+    @Override
+    public boolean entrar(String usuario, String senha) {
+        WebDriver d = navegador.driver();
+        // A conta do Gupy entra pelo LinkedIn: a senha do formulário e-mail/senha não vale, então clica no botão do LinkedIn
+        WebElement linkedin = botaoLinkedin(d);
+        if (linkedin != null) {
+            ((JavascriptExecutor) d).executeScript("arguments[0].click()", linkedin);
+            pausa(6000);
+            return !paginaDeLogin(d, d.getCurrentUrl()) && !d.getCurrentUrl().contains("linkedin.com/login");
+        }
+        return LoginAutomatico.entrar(d, usuario, senha);
+    }
+
+    private static WebElement botaoLinkedin(WebDriver d) {
+        for (WebElement e : d.findElements(By.cssSelector("button,a,[role=button]"))) {
+            try {
+                if (e.isDisplayed() && e.isEnabled() && (e.getText() + " " + e.getAttribute("aria-label")).toLowerCase().contains("linkedin"))
+                    return e;
+            } catch (org.openqa.selenium.StaleElementReferenceException ignored) {
+                // elemento trocado durante a leitura
+            }
+        }
+        return null;
     }
 
     @Override
@@ -86,11 +126,50 @@ public class GupyDriver implements PortalDriver {
         d.get(applyUrl);
         pausa(2500);
         String contexto = vaga.empresa() + " — " + vaga.cargo() + "\n" + vaga.descricao();
+        String anterior = null;
+        int parados = 0;
         for (int passo = 0; passo < 25 && continuar.getAsBoolean(); passo++) {
+            try {
+                String assinatura = d.getCurrentUrl() + "|" + texto(d).hashCode();
+                parados = assinatura.equals(anterior) ? parados + 1 : 0;
+                anterior = assinatura;
+                if (parados >= 3)
+                    return new Desfecho(Status.ERRO, "sem progresso: o botão não avança a página (campo obrigatório sem resposta?) · "
+                            + diagnosticoPagina(d));
+                Desfecho fim = passo(d, vaga, cv, dryRun, continuar, contexto, passo);
+                if (fim != null) return fim;
+            } catch (org.openqa.selenium.StaleElementReferenceException e) {
+                pausa(1000); // a página mudou no meio do passo: reavalia do começo
+            }
+        }
+        return new Desfecho(Status.ERRO, "fluxo não terminou em 25 passos · " + diagnosticoPagina(d));
+    }
+
+    /** URL, botões visíveis e fim do texto da página, para entender onde o fluxo travou. */
+    private static String diagnosticoPagina(WebDriver d) {
+        try {
+            StringBuilder botoes = new StringBuilder();
+            for (WebElement b : d.findElements(By.tagName("button")))
+                if (b.isDisplayed() && !b.getText().isBlank()) botoes.append('[').append(b.getText().trim()).append(']');
+            int radios = d.findElements(By.cssSelector("input[type=radio]")).size();
+            int marcados = d.findElements(By.cssSelector("input[type=radio]:checked")).size();
+            String t = texto(d).replaceAll("\\s+", " ");
+            return "url=" + d.getCurrentUrl() + " botões=" + botoes + " radios=" + marcados + "/" + radios
+                    + " texto=…" + (t.length() > 300 ? t.substring(t.length() - 300) : t);
+        } catch (Exception e) {
+            return "diagnóstico indisponível";
+        }
+    }
+
+    /** Um passo do formulário. Devolve o desfecho final, ou null para seguir ao próximo passo. */
+    private Desfecho passo(WebDriver d, Vaga vaga, Cv cv, boolean dryRun, BooleanSupplier continuar, String contexto,
+                           int passo) {
+        {
             String corpo = texto(d);
             String url = d.getCurrentUrl();
             if (corpo.contains("Candidatura finalizada")) return new Desfecho(Status.ENVIADA, "Candidatura finalizada");
-            if (url.contains("login") || url.contains("signin") || corpo.contains("Entrar na sua conta"))
+            if (jaCandidatou(corpo)) return new Desfecho(Status.PULADA, "já candidatada nesta conta");
+            if (paginaDeLogin(d, url))
                 return new Desfecho(Status.PRECISA_USUARIO, "login necessário no Gupy");
             if (corpo.toLowerCase().contains("captcha") || corpo.contains("verificação de segurança"))
                 return new Desfecho(Status.PRECISA_USUARIO, "CAPTCHA/verificação");
@@ -99,13 +178,30 @@ public class GupyDriver implements PortalDriver {
             if (r != null) return r;
 
             WebElement botao = proximoBotao(d);
-            if (botao == null) return new Desfecho(Status.ERRO, "nenhum botão de avanço encontrado (passo " + passo + ")");
+            if (botao == null) return new Desfecho(Status.ERRO, "nenhum botão de avanço encontrado (passo " + passo + ") · " + diagnosticoPagina(d));
             if (botao.getText().trim().equals("Finalizar candidatura") && dryRun)
                 return new Desfecho(Status.PRONTA_DRY_RUN, "dry-run: formulário completo, não enviado");
             ((JavascriptExecutor) d).executeScript("arguments[0].click()", botao);
             pausa(2000);
         }
-        return new Desfecho(Status.ERRO, "fluxo não terminou em 25 passos");
+        return null;
+    }
+
+    /** A página de uma vaga já candidatada não tem botão de avanço: avisa em vez disso. */
+    static boolean jaCandidatou(String corpo) {
+        String n = Texto.normalizar(corpo);
+        return n.contains("voce ja se candidatou") || n.contains("ja se candidatou") || n.contains("candidatura ja enviada")
+                || n.contains("candidatura enviada") || n.contains("voce ja participa") || n.contains("acompanhar candidatura");
+    }
+
+    /**
+     * Página de login = caminho /login ou /signin, ou campo de senha visível. Não usa o texto "Entrar na sua conta":
+     * ele aparece também no cabeçalho de páginas com a sessão já ativa (falso positivo que prendia a retomada).
+     */
+    private static boolean paginaDeLogin(WebDriver d, String url) {
+        String caminho = java.net.URI.create(url).getPath();
+        if (caminho != null && (caminho.contains("/login") || caminho.contains("/signin"))) return true;
+        return d.findElements(By.cssSelector("input[type=password]")).stream().anyMatch(WebElement::isDisplayed);
     }
 
     /** Preenche campos vazios e habilitados usando o rótulo como pergunta. Devolve desfecho se precisar parar. */

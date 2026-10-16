@@ -36,6 +36,7 @@ public class PainelController {
         m.addAttribute("estado", orq.estado());
         m.addAttribute("modo", kv.get(KvRepo.CONFIG, "modo", "codigo"));
         m.addAttribute("dryRun", Boolean.parseBoolean(kv.get(KvRepo.CONFIG, "dry_run", "true")));
+        m.addAttribute("naoInteragir", kv.booleano(KvRepo.CONFIG, "nao_interagir", false));
         m.addAttribute("pendencias", pendencias());
         m.addAttribute("pagina", "painel");
         return "painel";
@@ -51,6 +52,21 @@ public class PainelController {
     public String iniciar() {
         orq.iniciar();
         return "redirect:/";
+    }
+
+    /** Resposta ao alerta de login/pendência: "continuar" (já logou/resolveu) ou "pular". */
+    @PostMapping("/chamado/{decisao}")
+    @ResponseBody
+    public Map<String, Boolean> chamado(@org.springframework.web.bind.annotation.PathVariable String decisao) {
+        orq.decidir(decisao);
+        return Map.of("ok", true);
+    }
+
+    @PostMapping("/limparlog")
+    @ResponseBody
+    public Map<String, Boolean> limparLog() {
+        orq.limparLog();
+        return Map.of("ok", true);
     }
 
     @PostMapping("/parar")
@@ -78,6 +94,12 @@ public class PainelController {
     @PostMapping("/dryrun")
     public String dryRun(@RequestParam boolean ligado) {
         kv.put(KvRepo.CONFIG, "dry_run", String.valueOf(ligado));
+        return "redirect:/";
+    }
+
+    @PostMapping("/naointeragir")
+    public String naoInteragir(@RequestParam boolean ligado) {
+        kv.put(KvRepo.CONFIG, "nao_interagir", String.valueOf(ligado));
         return "redirect:/";
     }
 

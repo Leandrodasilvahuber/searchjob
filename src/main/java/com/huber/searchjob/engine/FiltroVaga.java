@@ -29,17 +29,31 @@ public class FiltroVaga {
         for (String t : lista("exige_ingles_oral"))
             if (Texto.contemPalavra(tudo, t)) return Optional.of("exige inglês oral: " + t);
         for (String t : lista("stack_proibida"))
-            if (!t.isEmpty() && tituloOuStackExclusiva(titulo, t)) return Optional.of("stack fora do perfil: " + t);
+            if (!t.isEmpty() && stackExclusiva(titulo, tudo, t)) return Optional.of("stack fora do perfil: " + t);
 
         if (v.local() != null && Texto.normalizar(v.local()).matches(".*\\b(portugal|estados unidos|usa|canada|espanha)\\b.*"))
             return Optional.of("vaga fora do Brasil");
         return Optional.empty();
     }
 
-    /** Só descarta por stack quando o termo aparece no título (descrição cita muita tecnologia de apoio). */
-    private static boolean tituloOuStackExclusiva(String titulo, String termo) {
-        if (termo.endsWith("-only")) return false; // exige análise do texto: tratado pelo modo z.ai
-        return Texto.contemPalavra(titulo, termo);
+    /**
+     * Termo simples: descarta se aparece no título (a descrição cita muita tecnologia de apoio).
+     * Termo "x-only" (normalizado "x only"): descarta se x está no título e nem o título nem a descrição citam alguma stack aceita
+     * (preferência stack_aceita; padrão node, php, laravel, react, vue, typescript).
+     */
+    private boolean stackExclusiva(String titulo, String tudo, String termo) {
+        // os termos chegam normalizados ("java-only" vira "java only")
+        if (!termo.endsWith(" only")) return Texto.contemPalavra(titulo, termo);
+        String base = termo.substring(0, termo.length() - " only".length());
+        if (!Texto.contemPalavra(titulo, base)) return false;
+        for (String aceita : listaOu("stack_aceita", "node,php,laravel,react,vue,typescript"))
+            if (Texto.contemPalavra(tudo, aceita)) return false;
+        return true;
+    }
+
+    private List<String> listaOu(String chave, String padrao) {
+        return Arrays.stream(kv.get(KvRepo.PREF, chave, padrao).split(","))
+                .map(Texto::normalizar).filter(s -> !s.isEmpty()).toList();
     }
 
     private List<String> lista(String chave) {
