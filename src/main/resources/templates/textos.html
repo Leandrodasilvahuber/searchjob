@@ -1,0 +1,21 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="pt-BR">
+<head th:replace="~{layout :: head('Textos da z.ai')}"></head>
+<body>
+<nav th:replace="~{layout :: menu(${pagina})}"></nav>
+<main>
+  <h1>Textos escritos pela z.ai</h1>
+  <p class="mut">Cada campo de texto livre/apresentação é escrito sob medida para a vaga e o CV usado. Aqui fica o que foi enviado. Para mudar o estilo, edite a instrução da situação correspondente em Situações.</p>
+  <p class="mut" th:if="${itens.isEmpty()}">Nenhum texto gerado ainda.</p>
+  <div class="card" th:each="t : ${itens}">
+    <div class="row">
+      <span class="tag" th:text="${t.portal}"></span>
+      <span class="mut" th:text="${t.vaga} + ' · CV ' + ${t.cv} + ' · ' + ${t.criadoEm}"></span>
+    </div>
+    <p><b th:text="${#strings.abbreviate(t.pergunta, 160)}"></b></p>
+    <pre th:text="${t.texto}"></pre>
+    <form th:action="@{/textos/{id}/excluir(id=${t.id})}" method="post"><button class="del">Excluir</button></form>
+  </div>
+</main>
+</body>
+</html>

@@ -22,6 +22,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 class SituacaoServiceTest extends BaseIT {
     @Autowired SituacaoService service;
     @Autowired SituacaoRepo repo;
+    @Autowired com.huber.searchjob.db.TextoGeradoRepo textos;
     @MockBean ZaiClient zai;
     @MockBean Aviso aviso;
     static final ObjectMapper JSON = new ObjectMapper();
@@ -76,5 +77,26 @@ class SituacaoServiceTest extends BaseIT {
     void dadoSensivelNuncaVaiParaZai() {
         assertEquals(Tipo.SENSIVEL, service.resolver("Gupy", "Número do RG", "", () -> true).tipo());
         assertEquals(Tipo.SENSIVEL, service.resolver("Gupy", "Nome completo do pai", "", () -> true).tipo());
+    }
+
+    @Test
+    void campoDiscursivoEGeradoSobMedidaParaCadaVagaSemConfirmacao() {
+        when(zai.configurado()).thenReturn(true);
+        when(zai.conversar(any(), any())).thenReturn("Texto A", "Texto B");
+        var cv = new com.huber.searchjob.db.Cv(1L, "Leandro_Huber_CV_NodeJS", "", "15 anos de experiência", "");
+        Resultado a = service.resolver("Gupy", "Apresente-se para a vaga", "Acme — Dev Node", cv, true, () -> true);
+        Resultado b = service.resolver("Gupy", "Apresente-se para a vaga", "Beta — Dev PHP", cv, true, () -> true);
+        assertEquals(Tipo.APLICADA, a.tipo());
+        assertEquals("Texto A", a.resposta());
+        assertEquals("Texto B", b.resposta()); // não reaproveita o texto da vaga anterior
+        assertEquals(2, textos.recentes().size());
+        assertTrue(repo.todas().stream().anyMatch(x -> "personalizada".equals(x.tipo())));
+    }
+
+    @Test
+    void deteccaoDeCampoDiscursivo() {
+        assertTrue(SituacaoService.discursiva("Conte sobre sua experiência", false));
+        assertTrue(SituacaoService.discursiva("Qualquer coisa", true));
+        assertFalse(SituacaoService.discursiva("Pretensão salarial", false));
     }
 }

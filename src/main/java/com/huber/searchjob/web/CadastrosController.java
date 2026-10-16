@@ -4,6 +4,7 @@ import com.huber.searchjob.db.CandidaturaRepo;
 import com.huber.searchjob.db.CvRepo;
 import com.huber.searchjob.db.KvRepo;
 import com.huber.searchjob.db.SituacaoRepo;
+import com.huber.searchjob.db.TextoGeradoRepo;
 import com.huber.searchjob.engine.SituacaoService;
 import com.huber.searchjob.engine.Texto;
 import java.util.List;
@@ -24,9 +25,11 @@ public class CadastrosController {
     private final SituacaoService situacaoService;
     private final CvRepo cvs;
     private final CandidaturaRepo candidaturas;
+    private final TextoGeradoRepo textos;
 
     public CadastrosController(KvRepo kv, SituacaoRepo situacoes, SituacaoService situacaoService, CvRepo cvs,
-                               CandidaturaRepo candidaturas) {
+                               CandidaturaRepo candidaturas, TextoGeradoRepo textos) {
+        this.textos = textos;
         this.kv = kv;
         this.situacoes = situacoes;
         this.situacaoService = situacaoService;
@@ -148,5 +151,20 @@ public class CadastrosController {
     public String historicoExcluir(@PathVariable long id) {
         candidaturas.excluir(id);
         return "redirect:/historico";
+    }
+
+    // --- textos que a z.ai escreveu por vaga ---
+
+    @GetMapping("/textos")
+    public String textosTela(Model m) {
+        m.addAttribute("itens", textos.recentes());
+        m.addAttribute("pagina", "textos");
+        return "textos";
+    }
+
+    @PostMapping("/textos/{id}/excluir")
+    public String textoExcluir(@PathVariable long id) {
+        textos.excluir(id);
+        return "redirect:/textos";
     }
 }

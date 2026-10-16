@@ -1,9 +1,11 @@
 package com.huber.searchjob.engine;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.huber.searchjob.db.Cv;
 import com.huber.searchjob.db.KvRepo;
 import com.huber.searchjob.db.Situacao;
 import com.huber.searchjob.db.SituacaoRepo;
+import com.huber.searchjob.db.TextoGeradoRepo;
 import java.util.Comparator;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
@@ -31,9 +33,12 @@ public class SituacaoService {
     private final ZaiClient zai;
     private final CvContexto cvContexto;
     private final Aviso aviso;
+    private final TextoGeradoRepo textos;
 
-    public SituacaoService(SituacaoRepo repo, KvRepo kv, ZaiClient zai, CvContexto cvContexto, Aviso aviso) {
+    public SituacaoService(SituacaoRepo repo, KvRepo kv, ZaiClient zai, CvContexto cvContexto, Aviso aviso,
+                           TextoGeradoRepo textos) {
         this.aviso = aviso;
+        this.textos = textos;
         this.repo = repo;
         this.kv = kv;
         this.zai = zai;
@@ -66,6 +71,32 @@ public class SituacaoService {
      * resolvida pela UI; devolve false para desistir (ex.: execução parada).
      */
     public Resultado resolver(String portal, String pergunta, String contextoVaga, BooleanSupplier continuar) {
+        return resolver(portal, pergunta, contextoVaga, null, false, continuar);
+    }
+
+    private static final String[] DISCURSIVAS = {"apresent", "conte", "fale sobre", "descreva", "por que", "porque voce",
+            "motivo", "motivacao", "carta", "sobre voce", "diferencial", "mensagem para", "fale um pouco"};
+    static final String INSTRUCAO_PADRAO =
+            "Escreva uma resposta personalizada para esta vaga, destacando as experiências do currículo mais relevantes para ela.";
+
+    /** Texto livre (área de texto ou pergunta aberta): a z.ai escreve sob medida para cada vaga em vez de reaproveitar. */
+    public static boolean discursiva(String pergunta, boolean areaDeTexto) {
+        if (areaDeTexto) return true;
+        String n = Texto.normalizar(pergunta);
+        for (String k : DISCURSIVAS) if (n.contains(k)) return true;
+        return false;
+    }
+
+    /**
+     * @param cv currículo escolhido para a vaga (usado nos textos personalizados)
+     * @param areaDeTexto true quando o campo é um textarea
+     */
+    public Resultado resolver(String portal, String pergunta, String contextoVaga, Cv cv, boolean areaDeTexto,
+                              BooleanSupplier continuar) {
+        if (!sensivel(pergunta) && discursiva(pergunta, areaDeTexto) && zai.configurado()) {
+            Resultado r = gerarPersonalizado(portal, pergunta, contextoVaga, cv);
+            if (r != null) return r;
+        }
         if (sensivel(pergunta)) {
             aviso.chamarUsuario();
             return new Resultado(Tipo.SENSIVEL, null, 0);
@@ -116,6 +147,57 @@ public class SituacaoService {
         }
         return new Resultado(Tipo.SEM_RESPOSTA, null, id);
     }
+
+    private Resultado gerarPersonalizado(String portal, String pergunta, String contextoVaga, Cv cv) {
+        Optional<Situacao> achada = buscar(portal, pergunta);
+        String instrucao = INSTRUCAO_PADRAO;
+        String aprovada = "";
+        long id;
+        if (achada.isPresent()) {
+            Situacao s = achada.get();
+            id = s.id();
+            if ("personalizada".equals(s.tipo())) instrucao = nvl(s.promptOuResposta(), INSTRUCAO_PADRAO);
+            else aprovada = nvl(s.promptOuResposta(), "");
+            repo.incrementarUso(id);
+        } else {
+            id = repo.inserir(portal, "personalizada", pergunta, Texto.hash(pergunta), INSTRUCAO_PADRAO,
+                    "zai", SituacaoRepo.ATIVA, "");
+        }
+        try {
+            String pedido = "PERGUNTA/CAMPO:\n" + pergunta + "\n\nINSTRUÇÕES DO CANDIDATO PARA ESTE TIPO DE CAMPO:\n" + instrucao
+                    + (aprovada.isBlank() ? "" : "\n\nRESPOSTA APROVADA ANTERIORMENTE (base de fatos e de tom):\n" + aprovada)
+                    + "\n\nVAGA:\n" + nvl(contextoVaga, "")
+                    + "\n\nDADOS FIXOS:\n" + kv.todos(KvRepo.DADO)
+                    + "\n\nCURRÍCULO ESCOLHIDO PARA ESTA VAGA:\n"
+                    + (cv != null && cv.textoExtraido() != null ? cv.textoExtraido() : cvContexto.textoCvs());
+            String texto = zai.conversar(SYSTEM_TEXTO, pedido).trim();
+            if (texto.isBlank()) return null;
+            textos.inserir(portal, pergunta, primeiraLinha(contextoVaga), cv == null ? "" : cv.nome(), texto);
+            return new Resultado(Tipo.APLICADA, texto, id);
+        } catch (RuntimeException e) {
+            return null; // z.ai fora do ar: cai no fluxo normal (resposta salva ou chamar o usuário)
+        }
+    }
+
+    private static String nvl(String s, String padrao) {
+        return s == null || s.isBlank() ? padrao : s;
+    }
+
+    private static String primeiraLinha(String s) {
+        if (s == null) return "";
+        int i = s.indexOf('\n');
+        return i < 0 ? s : s.substring(0, i);
+    }
+
+    private static final String SYSTEM_TEXTO = """
+            Você escreve, em primeira pessoa e em português do Brasil, a resposta de um candidato para um campo de texto livre
+            (apresentação, motivação, experiência) de uma candidatura. Adapte ao máximo à vaga indicada, destacando do currículo
+            fornecido apenas o que for relevante para ela.
+            Regras: use somente fatos do currículo e dos dados fixos; nunca invente empresa, tecnologia, tempo ou resultado;
+            se a vaga pedir algo que o currículo não mostra, não mencione. Inglês: nunca afirme fluência oral.
+            Tom profissional e direto, sem clichês nem saudações genéricas, de 3 a 6 frases (até 800 caracteres), sem markdown,
+            sem títulos e sem aspas. Responda SOMENTE com o texto final, pronto para colar no campo.
+            """;
 
     /** Usuário confirma (ou corrige) a resposta da z.ai: vira regra ativa, origem zai_confirmada. */
     public void confirmar(long id, String respostaFinal) {

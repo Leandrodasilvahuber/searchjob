@@ -95,7 +95,7 @@ public class GupyDriver implements PortalDriver {
             if (corpo.toLowerCase().contains("captcha") || corpo.contains("verificação de segurança"))
                 return new Desfecho(Status.PRECISA_USUARIO, "CAPTCHA/verificação");
 
-            Desfecho r = preencherCampos(d, vaga, contexto, continuar);
+            Desfecho r = preencherCampos(d, vaga, contexto, cv, continuar);
             if (r != null) return r;
 
             WebElement botao = proximoBotao(d);
@@ -109,12 +109,13 @@ public class GupyDriver implements PortalDriver {
     }
 
     /** Preenche campos vazios e habilitados usando o rótulo como pergunta. Devolve desfecho se precisar parar. */
-    private Desfecho preencherCampos(WebDriver d, Vaga vaga, String contexto, BooleanSupplier continuar) {
+    private Desfecho preencherCampos(WebDriver d, Vaga vaga, String contexto, Cv cv, BooleanSupplier continuar) {
         for (WebElement el : d.findElements(By.cssSelector("input[type=text],input[type=number],input:not([type]),textarea"))) {
             if (!el.isDisplayed() || !el.isEnabled() || !valor(el).isBlank()) continue;
             String pergunta = rotulo(d, el);
             if (pergunta.isBlank()) continue;
-            var res = situacoes.resolver("Gupy", pergunta, contexto, continuar);
+            boolean area = "textarea".equalsIgnoreCase(el.getTagName());
+            var res = situacoes.resolver("Gupy", pergunta, contexto, cv, area, continuar);
             switch (res.tipo()) {
                 case SENSIVEL -> {
                     return new Desfecho(Status.PRECISA_USUARIO, "dado sensível: " + pergunta);

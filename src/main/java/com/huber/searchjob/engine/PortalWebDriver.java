@@ -78,7 +78,7 @@ public abstract class PortalWebDriver implements PortalDriver {
             Optional<Desfecho> especial = casoEspecial(d, corpo);
             if (especial.isPresent()) return especial.get();
 
-            Desfecho r = preencherCampos(d, contexto, continuar);
+            Desfecho r = preencherCampos(d, contexto, cv, continuar);
             if (r != null) return r;
 
             WebElement envio = achar(d, botoesEnvio());
@@ -92,7 +92,7 @@ public abstract class PortalWebDriver implements PortalDriver {
         return new Desfecho(Status.ERRO, "fluxo não terminou em 20 passos");
     }
 
-    private Desfecho preencherCampos(WebDriver d, String contexto, BooleanSupplier continuar) {
+    private Desfecho preencherCampos(WebDriver d, String contexto, Cv cv, BooleanSupplier continuar) {
         for (WebElement el : d.findElements(By.cssSelector("input[type=text],input[type=number],input:not([type]),textarea"))) {
             try {
                 if (!el.isDisplayed() || !el.isEnabled()) continue;
@@ -100,7 +100,8 @@ public abstract class PortalWebDriver implements PortalDriver {
                 if (atual != null && !atual.isBlank()) continue;
                 String pergunta = rotulo(d, el);
                 if (pergunta.isBlank() || ehBusca(pergunta)) continue;
-                var res = situacoes.resolver(nome(), pergunta, contexto, continuar);
+                boolean area = "textarea".equalsIgnoreCase(el.getTagName());
+                var res = situacoes.resolver(nome(), pergunta, contexto, cv, area, continuar);
                 switch (res.tipo()) {
                     case SENSIVEL -> {
                         return new Desfecho(Status.PRECISA_USUARIO, "dado sensível: " + pergunta);

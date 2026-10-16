@@ -34,3 +34,12 @@ CREATE TABLE IF NOT EXISTS candidatura (
   data TEXT NOT NULL DEFAULT (date('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_cand_url ON candidatura(url);
+CREATE TABLE IF NOT EXISTS texto_gerado (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  portal TEXT,
+  pergunta TEXT,
+  vaga TEXT,
+  cv TEXT,
+  texto TEXT,
+  criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);

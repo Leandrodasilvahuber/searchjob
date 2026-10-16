@@ -53,4 +53,18 @@ class FiltroEscolhaTest extends BaseIT {
         assertEquals("Leandro_Huber_CV_Sistemas_Distribuidos", escolha.escolher(vaga("Dev Java", "kafka microsserviços spring", hoje)).orElseThrow().nome());
         assertEquals("Leandro_Huber_CV_NodeJS", escolha.escolher(vaga("Dev", "nada conhecido", hoje)).orElseThrow().nome());
     }
+
+    @Test
+    void sinalizaQuandoNaoHaDefinicaoEPriorizaLideranca() {
+        LocalDate hoje = LocalDate.now();
+        var indefinida = escolha.escolherDefinido(vaga("Dev", "nada conhecido", hoje)).orElseThrow();
+        assertFalse(indefinida.definida());
+        var clara = escolha.escolherDefinido(vaga("Dev Laravel", "php vue", hoje)).orElseThrow();
+        assertTrue(clara.definida());
+        var arq = escolha.escolherDefinido(vaga("Arquiteto de Software Sênior", "php laravel", hoje)).orElseThrow();
+        assertTrue(arq.definida());
+        assertEquals("Leandro_Huber_CV_Sistemas_Distribuidos", arq.cv().nome());
+        assertEquals("Leandro_Huber_CV_Sistemas_Distribuidos",
+                escolha.escolherDefinido(vaga("Tech Lead Node", "typescript", hoje)).orElseThrow().cv().nome());
+    }
 }

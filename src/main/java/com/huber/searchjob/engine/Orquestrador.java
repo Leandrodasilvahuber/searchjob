@@ -153,7 +153,22 @@ public class Orquestrador {
             registrar("pulada: " + rotulo + " (" + descarte.get() + ")");
             return;
         }
-        Optional<Cv> cv = escolhaCv.escolher(v);
+        Optional<EscolhaCv.Escolha> escolha = escolhaCv.escolherDefinido(v);
+        Optional<Cv> cv = escolha.map(EscolhaCv.Escolha::cv);
+        // stack sem definição clara (nenhuma palavra-chave ou empate): pergunta à z.ai qual CV mandar
+        if (!zaiAvalia && escolha.isPresent() && !escolha.get().definida() && zai.configurado()) {
+            try {
+                JsonNode r = zai.conversarJson(CV_SYSTEM, avaliaPedido(v));
+                String nomeCv = r.path("cv").asText("");
+                Optional<Cv> sugerido = cvs.todos().stream().filter(c -> c.nome().equalsIgnoreCase(nomeCv)).findFirst();
+                if (sugerido.isPresent()) {
+                    cv = sugerido;
+                    registrar("CV indefinido pelas regras — z.ai escolheu " + nomeCv);
+                }
+            } catch (RuntimeException e) {
+                registrar("z.ai indisponível para escolher CV, usando o padrão: " + e.getMessage());
+            }
+        }
         if (zaiAvalia) {
             try {
                 JsonNode r = zai.conversarJson(AVALIA_SYSTEM, avaliaPedido(v));
@@ -229,6 +244,12 @@ public class Orquestrador {
             }
         }
     }
+
+    private static final String CV_SYSTEM = """
+            Escolha qual currículo enviar para a vaga. Responda SOMENTE com JSON: {"cv": "nome exato de um dos CVs"}.
+            Considere o nível (pleno, sênior, arquiteto, líder) e a stack da vaga. Arquiteto/líder/staff/plataforma/microsserviços
+            => o CV de sistemas distribuídos; PHP/Laravel/Vue => o CV PHP; Node/TypeScript/full stack JS => o CV NodeJS.
+            """;
 
     private static final String AVALIA_SYSTEM = """
             Você avalia se uma vaga combina com o candidato. Responda SOMENTE com JSON:
