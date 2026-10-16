@@ -38,7 +38,9 @@ public class CathoDriver extends PortalWebDriver {
             String art = a.group();
             Matcher l = LINK.matcher(art);
             if (!l.find()) continue;
-            Matcher e = EMPRESA.matcher(art), lo = LOCAL.matcher(art), dt = DATA.matcher(art);
+            Matcher e = EMPRESA.matcher(art);
+            Matcher lo = LOCAL.matcher(art);
+            Matcher dt = DATA.matcher(art);
             LocalDate pub = null;
             if (dt.find()) { // a Catho só mostra dia/mês: se cair no futuro, é do ano passado
                 pub = LocalDate.of(hoje.getYear(), Integer.parseInt(dt.group(2)), Integer.parseInt(dt.group(1)));

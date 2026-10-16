@@ -1,0 +1,8 @@
+<FindBugsFilter>
+  <!-- Registros/DTOs do domínio expõem coleções e referências por desenho; sem risco de segurança neste app local -->
+  <Match><Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/></Match>
+  <!-- ProcessBuilder com argumentos fixos (paplay/pdftotext); caminhos vêm da configuração do próprio usuário -->
+  <Match><Bug pattern="COMMAND_INJECTION"/></Match>
+  <!-- Encerrar o serviço é a função do botão "Encerrar serviço" -->
+  <Match><Class name="com.huber.searchjob.engine.Encerramento"/><Bug pattern="DM_EXIT"/></Match>
+</FindBugsFilter>

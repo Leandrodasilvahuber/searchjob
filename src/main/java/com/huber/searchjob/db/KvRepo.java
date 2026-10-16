@@ -9,7 +9,9 @@ import org.springframework.stereotype.Repository;
 /** Acesso às tabelas chave/valor: dado_fixo, preferencia e config. */
 @Repository
 public class KvRepo {
-    public static final String DADO = "dado_fixo", PREF = "preferencia", CONFIG = "config";
+    public static final String DADO = "dado_fixo";
+    public static final String PREF = "preferencia";
+    public static final String CONFIG = "config";
     private static final Set<String> TABELAS = Set.of(DADO, PREF, CONFIG);
     private final JdbcClient jdbc;
 

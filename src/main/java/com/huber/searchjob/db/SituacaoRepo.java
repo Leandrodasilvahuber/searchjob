@@ -12,8 +12,10 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class SituacaoRepo {
-    public static final String ATIVA = "ativa", INATIVA = "inativa",
-            PENDENTE_CONFIRMACAO = "pendente_confirmacao", AGUARDANDO_USUARIO = "aguardando_usuario";
+    public static final String ATIVA = "ativa";
+    public static final String INATIVA = "inativa";
+    public static final String PENDENTE_CONFIRMACAO = "pendente_confirmacao";
+    public static final String AGUARDANDO_USUARIO = "aguardando_usuario";
 
     private static final String COLS = "id, portal, tipo, padrao_pergunta, hash, prompt_ou_resposta, origem, status, usos, contexto, criado_em";
     private static final RowMapper<Situacao> MAP = (rs, i) -> new Situacao(rs.getLong(1), rs.getString(2),

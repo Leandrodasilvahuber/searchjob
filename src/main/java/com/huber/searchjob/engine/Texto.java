@@ -42,7 +42,8 @@ public final class Texto {
      */
     public static boolean equivalentes(String a, String b) {
         if (similaridade(a, b) < 0.8) return false;
-        Set<String> ta = tokens(a), tb = tokens(b);
+        Set<String> ta = tokens(a);
+        Set<String> tb = tokens(b);
         return Stream.concat(ta.stream().filter(t -> !tb.contains(t)), tb.stream().filter(t -> !ta.contains(t)))
                 .allMatch(STOP::contains);
     }
@@ -57,7 +58,8 @@ public final class Texto {
 
     /** Similaridade de Jaccard entre os conjuntos de palavras. */
     public static double similaridade(String a, String b) {
-        Set<String> ta = tokens(a), tb = tokens(b);
+        Set<String> ta = tokens(a);
+        Set<String> tb = tokens(b);
         if (ta.isEmpty() || tb.isEmpty()) return 0;
         long inter = ta.stream().filter(tb::contains).count();
         return (double) inter / (ta.size() + tb.size() - inter);

@@ -40,7 +40,9 @@ public class MdImporter {
         semearPadroes();
         // já importado antes: não ressuscitar o que o usuário apagou pela tela
         if (kv.get(KvRepo.CONFIG, "md_importado", null) != null) return new Resultado(0, 0, 0, 0);
-        int d = 0, s = 0, c = 0;
+        int d = 0;
+        int s = 0;
+        int c = 0;
         Path md = pasta.resolve("respostas_candidaturas.md");
         if (Files.exists(md)) {
             List<String> linhas = Files.readAllLines(md);
@@ -117,7 +119,9 @@ public class MdImporter {
         if (!Files.isDirectory(pasta)) return 0;
         try (var stream = Files.list(pasta)) {
             for (Path pdf : stream.filter(p -> p.getFileName().toString().toLowerCase().endsWith(".pdf")).toList()) {
-                String nome = pdf.getFileName().toString().replaceFirst("(?i)\\.pdf$", "");
+                Path arquivo = pdf.getFileName();
+                if (arquivo == null) continue;
+                String nome = arquivo.toString().replaceFirst("(?i)\\.pdf$", "");
                 if (cvs.porNome(nome).isPresent()) continue;
                 cvs.salvar(nome, pdf.toString(), extrairTexto(pdf), regrasPadrao(nome));
                 n++;
@@ -137,9 +141,9 @@ public class MdImporter {
 
     private String extrairTexto(Path pdf) {
         try {
-            Process p = new ProcessBuilder("pdftotext", "-layout", pdf.toString(), "-")
+            Process p = new ProcessBuilder("pdftotext", "-enc", "UTF-8", "-layout", pdf.toString(), "-")
                     .redirectErrorStream(true).start();
-            String out = new String(p.getInputStream().readAllBytes());
+            String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
             p.waitFor(30, TimeUnit.SECONDS);
             return out;
         } catch (Exception e) {

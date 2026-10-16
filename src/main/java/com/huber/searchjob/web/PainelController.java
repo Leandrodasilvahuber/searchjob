@@ -3,6 +3,7 @@ package com.huber.searchjob.web;
 import com.huber.searchjob.db.CandidaturaRepo;
 import com.huber.searchjob.db.KvRepo;
 import com.huber.searchjob.db.SituacaoRepo;
+import com.huber.searchjob.engine.Encerramento;
 import com.huber.searchjob.engine.Orquestrador;
 import java.util.Map;
 import org.springframework.stereotype.Controller;
@@ -19,7 +20,11 @@ public class PainelController {
     private final SituacaoRepo situacoes;
     private final CandidaturaRepo candidaturas;
 
-    public PainelController(Orquestrador orq, KvRepo kv, SituacaoRepo situacoes, CandidaturaRepo candidaturas) {
+    private final Encerramento encerramento;
+
+    public PainelController(Orquestrador orq, KvRepo kv, SituacaoRepo situacoes, CandidaturaRepo candidaturas,
+                            Encerramento encerramento) {
+        this.encerramento = encerramento;
         this.orq = orq;
         this.kv = kv;
         this.situacoes = situacoes;
@@ -52,6 +57,16 @@ public class PainelController {
     public String parar() {
         orq.parar();
         return "redirect:/";
+    }
+
+    @PostMapping(value = "/encerrar", produces = "text/html;charset=UTF-8")
+    @ResponseBody
+    public String encerrar() {
+        encerramento.encerrar();
+        return "<!doctype html><meta charset=utf-8><title>SearchJob encerrado</title>"
+                + "<body style=\"font:16px system-ui;max-width:480px;margin:15vh auto;padding:0 16px\">"
+                + "<h1>SearchJob encerrado</h1><p>A sessão foi parada, o Firefox do robô foi fechado e o serviço saiu da memória. "
+                + "Para usar de novo, abra o SearchJob pelo atalho ou com <code>./run.sh</code>.</p></body>";
     }
 
     @PostMapping("/modo")

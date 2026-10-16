@@ -14,6 +14,15 @@ import org.springframework.test.web.servlet.MockMvc;
 @AutoConfigureMockMvc
 class OrigemLocalFilterTest extends BaseIT {
     @Autowired MockMvc mvc;
+    @org.springframework.boot.test.mock.mockito.MockBean com.huber.searchjob.engine.Encerramento encerramento;
+
+    @Test
+    void botaoEncerrarDerrubaOServicoSoComOrigemLocal() throws Exception {
+        mvc.perform(post("/encerrar")).andExpect(status().isForbidden());
+        org.mockito.Mockito.verifyNoInteractions(encerramento);
+        mvc.perform(post("/encerrar").header("Origin", "http://localhost:8787")).andExpect(status().isOk());
+        org.mockito.Mockito.verify(encerramento).encerrar();
+    }
 
     @Test
     void postSemOrigemOuDeOutroSiteEBloqueado() throws Exception {

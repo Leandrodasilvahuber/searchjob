@@ -9,7 +9,7 @@
     @media (prefers-color-scheme: dark) { :root { --bg:#111418; --card:#1a1f26; --fg:#e6e8eb; --mut:#98a2b3; --bd:#2d343d; --ac:#6ea0ff; --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; } }
     * { box-sizing: border-box; }
     body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, sans-serif; }
-    nav { display:flex; flex-wrap:wrap; gap:4px; padding:10px 16px; background:var(--card); border-bottom:1px solid var(--bd); position:sticky; top:0; }
+    nav { display:flex; flex-wrap:wrap; align-items:center; gap:4px; padding:10px 16px; background:var(--card); border-bottom:1px solid var(--bd); position:sticky; top:0; }
     nav a { color:var(--mut); text-decoration:none; padding:6px 12px; border-radius:6px; }
     nav a.on { background:var(--ac); color:#fff; }
     nav .badge { background:var(--bad); color:#fff; border-radius:10px; padding:0 7px; font-size:12px; margin-left:4px; }
@@ -43,6 +43,10 @@
   <a th:href="@{/kv/dado_fixo}" th:classappend="${pagina=='dado_fixo'} ? 'on'">Dados fixos</a>
   <a th:href="@{/kv/preferencia}" th:classappend="${pagina=='preferencia'} ? 'on'">Preferências</a>
   <a th:href="@{/kv/config}" th:classappend="${pagina=='config'} ? 'on'">Configuração</a>
+  <form th:action="@{/encerrar}" method="post" style="margin-left:auto"
+        onsubmit="return confirm('Encerrar o SearchJob? A sessão em andamento será parada, o Firefox do robô fechado e o serviço sairá da memória.')">
+    <button class="del" title="Para a sessão, fecha o Firefox do robô e derruba o serviço">⏻ Encerrar serviço</button>
+  </form>
 </nav>
 </body>
 </html>

@@ -54,7 +54,8 @@ public class ZaiClient {
     /** Pede JSON e extrai o primeiro objeto {...} da resposta. */
     public JsonNode conversarJson(String system, String user) {
         String txt = conversar(system, user);
-        int a = txt.indexOf('{'), b = txt.lastIndexOf('}');
+        int a = txt.indexOf('{');
+        int b = txt.lastIndexOf('}');
         if (a < 0 || b <= a) throw new IllegalStateException("Resposta da z.ai sem JSON: " + txt);
         try {
             return JSON.readTree(txt.substring(a, b + 1));

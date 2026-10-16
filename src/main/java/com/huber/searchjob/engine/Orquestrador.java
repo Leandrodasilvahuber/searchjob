@@ -14,6 +14,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Service;
 
 /** Executa a sessão de busca/candidatura em uma thread, vaga por vaga. */
@@ -28,16 +29,22 @@ public class Orquestrador {
     private final ZaiClient zai;
     private final CvContexto cvContexto;
     private final Aviso aviso;
+    private final FabricaDrivers fabrica;
 
     private volatile boolean rodando;
     private volatile String mensagem = "parado";
-    private volatile int processadas, enviadas, puladas, erros;
+    private final AtomicInteger processadas = new AtomicInteger();
+    private final AtomicInteger enviadas = new AtomicInteger();
+    private final AtomicInteger puladas = new AtomicInteger();
+    private final AtomicInteger erros = new AtomicInteger();
     private final Deque<String> log = new ArrayDeque<>();
     private Thread thread;
     private final Set<String> bloqueados = new HashSet<>();
 
     public Orquestrador(KvRepo kv, CandidaturaRepo candidaturas, CvRepo cvs, FiltroVaga filtro, EscolhaCv escolhaCv,
-                        SituacaoService situacoes, ZaiClient zai, CvContexto cvContexto, Aviso aviso) {
+                        SituacaoService situacoes, ZaiClient zai, CvContexto cvContexto, Aviso aviso,
+                        FabricaDrivers fabrica) {
+        this.fabrica = fabrica;
         this.kv = kv;
         this.candidaturas = candidaturas;
         this.cvs = cvs;
@@ -53,7 +60,7 @@ public class Orquestrador {
                          List<String> log) {}
 
     public synchronized Estado estado() {
-        return new Estado(rodando, mensagem, processadas, enviadas, puladas, erros, new ArrayList<>(log));
+        return new Estado(rodando, mensagem, processadas.get(), enviadas.get(), puladas.get(), erros.get(), new ArrayList<>(log));
     }
 
     public synchronized void iniciar() {
@@ -63,7 +70,10 @@ public class Orquestrador {
             return;
         }
         rodando = true;
-        processadas = enviadas = puladas = erros = 0;
+        processadas.set(0);
+        enviadas.set(0);
+        puladas.set(0);
+        erros.set(0);
         log.clear();
         thread = new Thread(this::executar, "searchjob-sessao");
         thread.setDaemon(true);
@@ -74,6 +84,15 @@ public class Orquestrador {
         rodando = false;
         mensagem = "parando…";
         if (thread != null) thread.interrupt();
+    }
+
+    /** Espera a thread da sessão terminar (e o Firefox fechar), por no máximo {@code ms}. */
+    public void aguardarFim(long ms) throws InterruptedException {
+        Thread t;
+        synchronized (this) {
+            t = thread;
+        }
+        if (t != null && t != Thread.currentThread()) t.join(ms);
     }
 
     private void registrar(String linha) {
@@ -89,15 +108,10 @@ public class Orquestrador {
         List<PortalDriver> drivers = new ArrayList<>();
         try {
             for (String p : kv.get(KvRepo.CONFIG, "portais", "gupy").split(",")) {
-                switch (p.trim().toLowerCase()) {
-                    case "gupy" -> drivers.add(new GupyDriver(navegador, situacoes));
-                    case "programathor" -> drivers.add(new ProgramaThorDriver(navegador, situacoes));
-                    case "catho" -> drivers.add(new CathoDriver(navegador, situacoes));
-                    case "indeed" -> drivers.add(new IndeedDriver(navegador, situacoes,
-                            kv.inteiro(KvRepo.PREF, "recencia_dias", 14)));
-                    case "" -> { }
-                    default -> registrar("portal \"" + p.trim() + "\" ainda não é suportado — ignorado");
-                }
+                if (p.isBlank()) continue;
+                Optional<PortalDriver> d = fabrica.criar(p, navegador);
+                if (d.isPresent()) drivers.add(d.get());
+                else registrar("portal \"" + p.trim() + "\" ainda não é suportado — ignorado");
             }
             boolean zaiAvalia = "zai".equals(kv.get(KvRepo.CONFIG, "modo", "codigo"));
             boolean dryRun = Boolean.parseBoolean(kv.get(KvRepo.CONFIG, "dry_run", "true"));
@@ -134,8 +148,8 @@ public class Orquestrador {
                     }
                 }
             }
-            registrar("✨ terminei — " + processadas + " processadas · " + enviadas + " enviadas · "
-                    + puladas + " puladas · " + erros + " erros");
+            registrar("✨ terminei — " + processadas.get() + " processadas · " + enviadas.get() + " enviadas · "
+                    + puladas.get() + " puladas · " + erros.get() + " erros");
             if (rodando) aviso.fim(); // não toca se o usuário parou a sessão
         } catch (Exception e) {
             registrar("sessão interrompida: " + e.getMessage());
@@ -147,12 +161,12 @@ public class Orquestrador {
     }
 
     private void processar(PortalDriver driver, Vaga v, boolean zaiAvalia, boolean dryRun) {
-        processadas++;
+        processadas.incrementAndGet();
         String rotulo = v.empresa() + " — " + v.cargo();
         Optional<String> descarte = filtro.motivoDescarte(v, LocalDate.now());
         if (descarte.isPresent()) {
             candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", descarte.get());
-            puladas++;
+            puladas.incrementAndGet();
             aviso.pulada();
             registrar("pulada: " + rotulo + " (" + descarte.get() + ")");
             return;
@@ -179,7 +193,7 @@ public class Orquestrador {
                 if (!r.path("candidatar").asBoolean(false)) {
                     String motivo = "z.ai: " + r.path("motivo").asText("fora do perfil");
                     candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", motivo);
-                    puladas++;
+                    puladas.incrementAndGet();
                     aviso.pulada();
                     registrar("pulada: " + rotulo + " (" + motivo + ")");
                     return;
@@ -214,7 +228,7 @@ public class Orquestrador {
         switch (d.status()) {
             case ENVIADA -> {
                 candidaturas.atualizarStatus(id, "enviada", d.motivo());
-                enviadas++;
+                enviadas.incrementAndGet();
                 aviso.enviada();
                 registrar("enviada: " + rotulo);
             }
@@ -235,13 +249,13 @@ public class Orquestrador {
             }
             case PULADA -> {
                 candidaturas.atualizarStatus(id, "pulada", d.motivo());
-                puladas++;
+                puladas.incrementAndGet();
                 aviso.pulada();
                 registrar("pulada: " + rotulo + " (" + d.motivo() + ")");
             }
             default -> {
                 candidaturas.atualizarStatus(id, "erro", d.motivo());
-                erros++;
+                erros.incrementAndGet();
                 registrar("erro: " + rotulo + " (" + d.motivo() + ")");
             }
         }
