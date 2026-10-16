@@ -16,10 +16,17 @@ public class FiltroVaga {
         this.kv = kv;
     }
 
-    public Optional<String> motivoDescarte(Vaga v, LocalDate hoje) {
+    /** Único descarte objetivo (data); o restante é julgamento, que no modo IA fica com a IA. */
+    public Optional<String> motivoRecencia(Vaga v, LocalDate hoje) {
         int dias = kv.inteiro(KvRepo.PREF, "recencia_dias", 14);
         if (v.publicada() != null && v.publicada().isBefore(hoje.minusDays(dias)))
             return Optional.of("fora da recência (" + dias + " dias)");
+        return Optional.empty();
+    }
+
+    public Optional<String> motivoDescarte(Vaga v, LocalDate hoje) {
+        Optional<String> velha = motivoRecencia(v, hoje);
+        if (velha.isPresent()) return velha;
 
         String titulo = Texto.normalizar(v.cargo());
         for (String t : lista("excluir_titulos"))

@@ -36,6 +36,7 @@ public class PainelController {
         m.addAttribute("estado", orq.estado());
         m.addAttribute("modo", kv.get(KvRepo.CONFIG, "modo", "codigo"));
         m.addAttribute("dryRun", Boolean.parseBoolean(kv.get(KvRepo.CONFIG, "dry_run", "true")));
+        m.addAttribute("relatorio", kv.booleano(KvRepo.CONFIG, "relatorio_desktop", false));
         m.addAttribute("naoInteragir", kv.booleano(KvRepo.CONFIG, "nao_interagir", false));
         m.addAttribute("pendencias", pendencias());
         m.addAttribute("pagina", "painel");
@@ -87,7 +88,7 @@ public class PainelController {
 
     @PostMapping("/modo")
     public String modo(@RequestParam String modo) {
-        kv.put(KvRepo.CONFIG, "modo", "zai".equals(modo) ? "zai" : "codigo");
+        kv.put(KvRepo.CONFIG, "modo", "ia".equals(modo) ? "ia" : "codigo");
         return "redirect:/";
     }
 
@@ -100,6 +101,12 @@ public class PainelController {
     @PostMapping("/naointeragir")
     public String naoInteragir(@RequestParam boolean ligado) {
         kv.put(KvRepo.CONFIG, "nao_interagir", String.valueOf(ligado));
+        return "redirect:/";
+    }
+
+    @PostMapping("/relatorio")
+    public String relatorio(@RequestParam boolean ligado) {
+        kv.put(KvRepo.CONFIG, "relatorio_desktop", String.valueOf(ligado));
         return "redirect:/";
     }
 

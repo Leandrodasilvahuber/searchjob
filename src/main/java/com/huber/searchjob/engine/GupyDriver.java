@@ -65,7 +65,12 @@ public class GupyDriver implements PortalDriver {
         if (linkedin != null) {
             ((JavascriptExecutor) d).executeScript("arguments[0].click()", linkedin);
             pausa(6000);
-            return !paginaDeLogin(d, d.getCurrentUrl()) && !d.getCurrentUrl().contains("linkedin.com/login");
+            if (d.getCurrentUrl().contains("linkedin.com") && d.getCurrentUrl().contains("login")) {
+                // cai na tela de login do LinkedIn (/uas/login ou /login): preenche com o login salvo
+                if (!LoginAutomatico.entrar(d, usuario, senha)) return false;
+                pausa(6000);
+            }
+            return !paginaDeLogin(d, d.getCurrentUrl()) && !d.getCurrentUrl().contains("linkedin.com");
         }
         return LoginAutomatico.entrar(d, usuario, senha);
     }
@@ -150,7 +155,7 @@ public class GupyDriver implements PortalDriver {
         try {
             StringBuilder botoes = new StringBuilder();
             for (WebElement b : d.findElements(By.tagName("button")))
-                if (b.isDisplayed() && !b.getText().isBlank()) botoes.append('[').append(b.getText().trim()).append(']');
+                if (b.isDisplayed() && !b.getText().isBlank()) botoes.append('[').append(b.getText().trim()).append(b.isEnabled() ? "" : " (desabilitado)").append(']');
             int radios = d.findElements(By.cssSelector("input[type=radio]")).size();
             int marcados = d.findElements(By.cssSelector("input[type=radio]:checked")).size();
             String t = texto(d).replaceAll("\\s+", " ");
@@ -177,7 +182,14 @@ public class GupyDriver implements PortalDriver {
             Desfecho r = preencherCampos(d, vaga, contexto, cv, continuar);
             if (r != null) return r;
 
-            WebElement botao = proximoBotao(d);
+            WebElement botao = null;
+            for (int t = 0; t < 10 && botao == null; t++) {
+                botao = proximoBotao(d);
+                if (botao == null) {
+                    fecharCookies(d);
+                    pausa(1000); // o botão pode estar desabilitado enquanto a etapa carrega
+                }
+            }
             if (botao == null) return new Desfecho(Status.ERRO, "nenhum botão de avanço encontrado (passo " + passo + ") · " + diagnosticoPagina(d));
             if (botao.getText().trim().equals("Finalizar candidatura") && dryRun)
                 return new Desfecho(Status.PRONTA_DRY_RUN, "dry-run: formulário completo, não enviado");
@@ -222,13 +234,22 @@ public class GupyDriver implements PortalDriver {
                 default -> el.sendKeys(res.resposta());
             }
         }
-        // perguntas Sim/Não (radio) ficam para a próxima iteração com suporte dedicado
-        return null;
+        return Radios.preencher(d, situacoes, "Gupy", contexto, cv, continuar);
     }
 
-    private static String rotulo(WebDriver d, WebElement el) {
+    /**
+     * Pergunta do campo: o label (mesmo curto, como "UF") se não for só uma dica ("Máx. 1000 caracteres"); senão sobe pelos
+     * ancestrais, parando antes de um que contenha mais de um campo (para não pegar a pergunta de outro).
+     */
+    static String rotulo(WebDriver d, WebElement el) {
         Object o = ((JavascriptExecutor) d).executeScript(
-                "var e=arguments[0];var l=e.labels&&e.labels[0];if(l)return l.innerText;"
+                "var e=arguments[0];var dica=/^(m[aá]x\\.?|min\\.?|obrigat|opcional|\\*|\\d+\\s*\\/\\s*\\d+)|caracteres\\s*$/i;"
+                        + "function bom(t,min){t=(t||'').trim();return t.length>=min&&!dica.test(t);}"
+                        + "var l=e.labels&&e.labels[0];if(l&&bom(l.innerText,1))return l.innerText;"
+                        + "var a=e.parentElement;for(var i=0;i<6&&a;i++){"
+                        + "if(a.querySelectorAll('input:not([type=hidden]):not([type=radio]),textarea,select').length>1)break;"
+                        + "var ls=a.innerText.split('\\n').map(function(s){return s.trim();}).filter(function(s){return bom(s,3);});"
+                        + "if(ls.length)return ls[0];a=a.parentElement;}"
                         + "var p=e.closest('label,div');return p?p.innerText:'';", el);
         return o == null ? "" : o.toString().trim();
     }
@@ -240,11 +261,26 @@ public class GupyDriver implements PortalDriver {
 
     private static WebElement proximoBotao(WebDriver d) {
         for (String t : BOTOES) {
+            String alvo = Texto.normalizar(t);
             for (WebElement b : d.findElements(By.tagName("button"))) {
-                if (b.isDisplayed() && b.isEnabled() && b.getText().trim().equals(t)) return b;
+                if (b.isDisplayed() && b.isEnabled() && Texto.normalizar(b.getText()).equals(alvo)
+                        && !"true".equals(b.getAttribute("aria-disabled"))) return b;
             }
         }
         return null;
+    }
+
+    /** O banner de cookies pode cobrir a página e atrapalhar a etapa: recusa se estiver visível. */
+    private static void fecharCookies(WebDriver d) {
+        try {
+            for (WebElement b : d.findElements(By.tagName("button")))
+                if (b.isDisplayed() && Texto.normalizar(b.getText()).matches("reject all|rejeitar todos|recusar")) {
+                    ((JavascriptExecutor) d).executeScript("arguments[0].click()", b);
+                    return;
+                }
+        } catch (RuntimeException e) {
+            // banner sumiu no meio: ignora
+        }
     }
 
     private static String texto(WebDriver d) {

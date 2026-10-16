@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 
 /** Cliente do OpenRouter (chat/completions) com fallback entre modelos free. URL, modelos e chave ficam na tabela config. */
 @Component
-public class ZaiClient {
+public class IaClient {
     private static final ObjectMapper JSON = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
     /** Depois de uma falha o OpenRouter fica pausado por este tempo: o fluxo segue pelas regras sem esperar timeout a cada pergunta. */
@@ -22,7 +22,7 @@ public class ZaiClient {
     private final KvRepo kv;
     private volatile java.time.Instant pausadaAte = java.time.Instant.EPOCH;
 
-    public ZaiClient(KvRepo kv) {
+    public IaClient(KvRepo kv) {
         this.kv = kv;
     }
 
@@ -45,13 +45,17 @@ public class ZaiClient {
 
     /** Tenta cada modelo da lista (openrouter_modelos, separados por vírgula) até um responder. */
     private String chamar(String system, String user) {
+        TesteFullLog.ativo = kv.booleano(KvRepo.CONFIG, "relatorio_desktop", false);
         String[] modelos = kv.get(KvRepo.CONFIG, "openrouter_modelos", "").split(",");
         IllegalStateException ultima = new IllegalStateException("Nenhum modelo configurado em openrouter_modelos");
         for (String m : modelos) {
             if (m.isBlank()) continue;
             try {
-                return chamarModelo(m.trim(), system, user);
+                String r = chamarModelo(m.trim(), system, user);
+                TesteFullLog.texto(m.trim(), user, r); // TEMP-TESTE-FULL
+                return r;
             } catch (IllegalStateException e) {
+                TesteFullLog.falha(m.trim(), String.valueOf(e.getMessage())); // TEMP-TESTE-FULL
                 ultima = e;
             }
         }
@@ -66,7 +70,7 @@ public class ZaiClient {
                     "messages", List.of(Map.of("role", "system", "content", system),
                             Map.of("role", "user", "content", user))));
             HttpRequest req = HttpRequest.newBuilder(URI.create(kv.get(KvRepo.CONFIG, "openrouter_url", "")))
-                    .timeout(Duration.ofSeconds(60))
+                    .timeout(Duration.ofSeconds(200))
                     .header("Authorization", "Bearer " + kv.get(KvRepo.CONFIG, "openrouter_chave", ""))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(corpo)).build();

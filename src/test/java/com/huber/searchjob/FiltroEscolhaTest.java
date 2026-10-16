@@ -38,6 +38,13 @@ class FiltroEscolhaTest extends BaseIT {
     }
 
     @Test
+    void motivoRecenciaIgnoraStackETitulo() {
+        LocalDate hoje = LocalDate.of(2026, 7, 1);
+        assertTrue(filtro.motivoRecencia(vaga("Dev PHP", "", hoje.minusDays(30)), hoje).isPresent());
+        assertTrue(filtro.motivoRecencia(vaga("Estagiário de TI", "Reuniões em inglês", hoje), hoje).isEmpty());
+    }
+
+    @Test
     void descartaRecenciaEstagioEInglesOral() {
         LocalDate hoje = LocalDate.of(2026, 10, 16);
         assertTrue(filtro.motivoDescarte(vaga("Dev PHP", "", hoje.minusDays(30)), hoje).isPresent());

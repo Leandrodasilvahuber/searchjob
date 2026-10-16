@@ -16,7 +16,7 @@ import com.huber.searchjob.engine.PortalWebDriver;
 import com.huber.searchjob.engine.SituacaoService;
 import com.huber.searchjob.engine.Texto;
 import com.huber.searchjob.engine.Vaga;
-import com.huber.searchjob.engine.ZaiClient;
+import com.huber.searchjob.engine.IaClient;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -32,7 +32,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 
 /**
  * Firefox real (headless) contra um "portal" local: valida o laço genérico de candidatura —
- * preenchimento de campo curto pela resposta salva, texto livre pela z.ai, parada do dry-run antes do envio,
+ * preenchimento de campo curto pela resposta salva, texto livre pela IA, parada do dry-run antes do envio,
  * envio real, e a detecção de login (campo de senha visível x escondido).
  * É ignorado se o Firefox/geckodriver não estiverem disponíveis.
  */
@@ -41,7 +41,7 @@ class FormularioFirefoxE2ETest extends BaseIT {
     private static HttpServer servidor;
     private static String base;
 
-    @MockBean ZaiClient zai;
+    @MockBean IaClient ia;
     @MockBean Aviso aviso;
     @Autowired SituacaoService situacoes;
     @Autowired SituacaoRepo repo;
@@ -51,6 +51,17 @@ class FormularioFirefoxE2ETest extends BaseIT {
         servidor = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         pagina("/vaga", "<h1>Vaga</h1><label for=q>Quantos anos de experiência com Docker?</label><input id=q type=text>"
                 + "<label for=ap>Apresente-se</label><textarea id=ap></textarea>"
+                + "<button id=b onclick=\"document.body.innerHTML+='<p>Candidatura enviada</p>'\">Quero me candidatar</button>");
+        pagina("/radios", "<h1>Vaga</h1><fieldset><legend>Você tem experiência com Node.js?</legend>"
+                + "<label><input type=radio name=r1 value=s> Sim</label><label><input type=radio name=r1 value=n> Não</label></fieldset>"
+                + "<div><div><p>Qual seu regime preferido?</p></div><div><label><input type=radio name=r2 value=c> CLT</label></div>"
+                + "<div><label><input type=radio name=r2 value=p> PJ</label></div></div>"
+                + "<div><label for=t>Conte sobre sua experiência</label><span>Máx. 1000 caracteres</span><textarea id=t></textarea></div>"
+                + "<button id=b onclick=\"document.body.innerHTML+='<p>Candidatura enviada</p>'\">Quero me candidatar</button>");
+        pagina("/radios2", "<h1>Vaga</h1><div role=radiogroup><p>Modelo de trabalho?</p>"
+                + "<label><input type=radio> Remoto</label><label><input type=radio> Híbrido</label></div>"
+                + "<div style='display:none'><fieldset><legend>Aceitar cookies de marketing?</legend>"
+                + "<label><input type=radio name=ck value=a> Aceitar</label><label><input type=radio name=ck value=r> Rejeitar</label></fieldset></div>"
                 + "<button id=b onclick=\"document.body.innerHTML+='<p>Candidatura enviada</p>'\">Quero me candidatar</button>");
         pagina("/login", "<h1>Entrar</h1><input type=password id=p><button>Entrar</button>");
         pagina("/escondido", "<div style='display:none'><input type=password></div><h1>Vaga</h1>"
@@ -137,8 +148,8 @@ class FormularioFirefoxE2ETest extends BaseIT {
 
     @Test
     void preencheParaNoDryRunEEnviaDeVerdade() {
-        when(zai.configurado()).thenReturn(true);
-        when(zai.conversar(any(), any())).thenReturn("Texto sob medida para a vaga");
+        when(ia.configurado()).thenReturn(true);
+        when(ia.conversar(any(), any())).thenReturn("Texto sob medida para a vaga");
         repo.inserir("Local", "pergunta", "Quantos anos de experiência com Docker?",
                 Texto.hash("Quantos anos de experiência com Docker?"), "8 anos", "usuario", SituacaoRepo.ATIVA, "");
 
@@ -157,6 +168,46 @@ class FormularioFirefoxE2ETest extends BaseIT {
             var real = portal.candidatar(vaga("/vaga"), CV, false, () -> true);
             assertEquals(PortalDriver.Status.ENVIADA, real.status(), real.motivo());
             assertTrue(nav.driver().findElement(By.tagName("body")).getText().contains("Candidatura enviada"));
+        } finally {
+            nav.fechar();
+        }
+    }
+
+    @Test
+    void respondePerguntasDeMultiplaEscolhaPelasRespostasSalvas() {
+        when(ia.configurado()).thenReturn(false);
+        String q1 = "Você tem experiência com Node.js? [opções: Sim | Não]";
+        String q2 = "Qual seu regime preferido? [opções: CLT | PJ]";
+        repo.inserir("Local", "pergunta", q1, Texto.hash(q1), "Sim, 10 anos", "usuario", SituacaoRepo.ATIVA, "");
+        repo.inserir("Local", "pergunta", q2, Texto.hash(q2), "PJ", "usuario", SituacaoRepo.ATIVA, "");
+        repo.inserir("Local", "pergunta", "Conte sobre sua experiência", Texto.hash("Conte sobre sua experiência"),
+                "15 anos de backend", "usuario", SituacaoRepo.ATIVA, "");
+        NavegadorFirefox nav = navegador();
+        try {
+            var r = new PortalLocal(nav, situacoes).candidatar(vaga("/radios"), CV, true, () -> true);
+            assertEquals(PortalDriver.Status.PRONTA_DRY_RUN, r.status(), r.motivo());
+            var d = nav.driver();
+            assertTrue(d.findElement(By.cssSelector("input[name=r1][value=s]")).isSelected());
+            assertTrue(d.findElement(By.cssSelector("input[name=r2][value=p]")).isSelected());
+            assertEquals("15 anos de backend", d.findElement(By.id("t")).getAttribute("value"));
+        } finally {
+            nav.fechar();
+        }
+    }
+
+    @Test
+    void radioSemNameEntraPeloRadiogroupEGrupoInvisivelEIgnorado() {
+        when(ia.configurado()).thenReturn(false);
+        String q = "Modelo de trabalho? [opções: Híbrido | Remoto]";
+        repo.inserir("Local", "pergunta", q, Texto.hash(q), "Remoto", "usuario", SituacaoRepo.ATIVA, "");
+        NavegadorFirefox nav = navegador();
+        try {
+            var r = new PortalLocal(nav, situacoes).candidatar(vaga("/radios2"), CV, true, () -> true);
+            assertEquals(PortalDriver.Status.PRONTA_DRY_RUN, r.status(), r.motivo());
+            var d = nav.driver();
+            var marcados = d.findElements(By.cssSelector("input[type=radio]:checked"));
+            assertEquals(1, marcados.size(), "só o grupo visível é respondido; cookies ocultos ficam como estão");
+            assertTrue(marcados.get(0).findElement(By.xpath("..")).getText().contains("Remoto"));
         } finally {
             nav.fechar();
         }

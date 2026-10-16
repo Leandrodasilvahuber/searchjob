@@ -7,7 +7,7 @@ import com.huber.searchjob.db.SituacaoRepo;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
-/** Monta o contexto (CV + respostas salvas) enviado à z.ai. Sempre lido do banco, nunca do .md. */
+/** Monta o contexto (CV + respostas salvas) enviado à IA. Sempre lido do banco, nunca do .md. */
 @Component
 public class CvContexto {
     private final CvRepo cvs;

@@ -174,7 +174,7 @@ public abstract class PortalWebDriver implements PortalDriver {
                 return null; // a página mudou; o laço principal reavalia
             }
         }
-        return null;
+        return Radios.preencher(d, situacoes, nome(), contexto, cv, continuar);
     }
 
     private static boolean ehBusca(String rotulo) {

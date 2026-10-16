@@ -29,7 +29,7 @@ public class Orquestrador {
     private final FiltroVaga filtro;
     private final EscolhaCv escolhaCv;
     private final SituacaoService situacoes;
-    private final ZaiClient zai;
+    private final IaClient ia;
     private final CvContexto cvContexto;
     private final Aviso aviso;
     private final FabricaDrivers fabrica;
@@ -48,12 +48,15 @@ public class Orquestrador {
     private final AtomicInteger enviadas = new AtomicInteger();
     private final AtomicInteger puladas = new AtomicInteger();
     private final AtomicInteger erros = new AtomicInteger();
+    private final AtomicInteger encontradasTotal = new AtomicInteger(); // TEMP-TESTE-FULL
+    private final AtomicInteger jaNoHistorico = new AtomicInteger(); // TEMP-TESTE-FULL
+    private volatile long idInicial; // TEMP-TESTE-FULL
     private final Deque<Evento> log = new ArrayDeque<>();
     private Thread thread;
     private final Set<String> bloqueados = new HashSet<>();
 
     public Orquestrador(KvRepo kv, CandidaturaRepo candidaturas, CvRepo cvs, FiltroVaga filtro, EscolhaCv escolhaCv,
-                        SituacaoService situacoes, ZaiClient zai, CvContexto cvContexto, Aviso aviso,
+                        SituacaoService situacoes, IaClient ia, CvContexto cvContexto, Aviso aviso,
                         FabricaDrivers fabrica, CredencialRepo credenciais) {
         this.fabrica = fabrica;
         this.credenciais = credenciais;
@@ -63,7 +66,7 @@ public class Orquestrador {
         this.filtro = filtro;
         this.escolhaCv = escolhaCv;
         this.situacoes = situacoes;
-        this.zai = zai;
+        this.ia = ia;
         this.cvContexto = cvContexto;
         this.aviso = aviso;
     }
@@ -229,14 +232,17 @@ public class Orquestrador {
                 if (d.isPresent()) drivers.add(d.get());
                 else registrar("portal \"" + p.trim() + "\" ainda não é suportado — ignorado");
             }
-            boolean zaiAvalia = "zai".equals(kv.get(KvRepo.CONFIG, "modo", "codigo"));
+            boolean iaAvalia = "ia".equals(kv.get(KvRepo.CONFIG, "modo", "codigo"));
             boolean dryRun = Boolean.parseBoolean(kv.get(KvRepo.CONFIG, "dry_run", "true"));
             int max = kv.inteiro(KvRepo.CONFIG, "max_vagas", 30);
-            if (zaiAvalia && !zai.configurado()) {
-                registrar("modo z.ai sem chave configurada — voltando ao modo código");
-                zaiAvalia = false;
+            if (iaAvalia && !ia.configurado()) {
+                registrar("modo IA sem chave configurada — voltando ao modo código");
+                iaAvalia = false;
             }
-            registrar("sessão iniciada · modo " + (zaiAvalia ? "z.ai avalia" : "código") + (dryRun ? " · dry-run" : ""));
+            registrar("sessão iniciada · modo " + (iaAvalia ? "IA avalia" : "código") + (dryRun ? " · dry-run" : ""));
+            encontradasTotal.set(0); // TEMP-TESTE-FULL
+            jaNoHistorico.set(0); // TEMP-TESTE-FULL
+            idInicial = candidaturas.listar("", "").stream().mapToLong(c -> c.id()).max().orElse(0); // TEMP-TESTE-FULL
             Set<String> vistas = new HashSet<>();
             Set<String> feitas = new HashSet<>();
             bloqueados.clear();
@@ -259,6 +265,7 @@ public class Orquestrador {
                         }
                     }
                     if (vagas == null) continue;
+                    encontradasTotal.addAndGet(vagas.size()); // TEMP-TESTE-FULL
                     if (vagas.isEmpty()) registrar(driver.nome() + ": nenhuma vaga para \"" + termo.trim()
                             + "\" (o portal pode não ter essa categoria)");
                     int jaFeitas = 0;
@@ -269,19 +276,21 @@ public class Orquestrador {
                             jaFeitas++;
                             continue;
                         }
-                        processar(driver, v, zaiAvalia, dryRun);
+                        processar(driver, v, iaAvalia);
                         int maxEnvios = kv.inteiro(KvRepo.CONFIG, "max_envios", 0);
                         if (maxEnvios > 0 && enviadas.get() >= maxEnvios) {
                             registrar("limite de " + maxEnvios + " envio(s) atingido — encerrando a sessão");
                             rodando = false;
                         }
                     }
+                    jaNoHistorico.addAndGet(jaFeitas); // TEMP-TESTE-FULL
                     if (jaFeitas > 0) registrar(driver.nome() + ": " + jaFeitas + " de " + vagas.size()
                             + " vaga(s) de \"" + termo.trim() + "\" já estavam no histórico e foram ignoradas");
                 }
             }
             registrar("✨ terminei — " + processadas.get() + " processadas · " + enviadas.get() + " enviadas · "
                     + puladas.get() + " puladas · " + erros.get() + " erros");
+            if (kv.booleano(KvRepo.CONFIG, "relatorio_desktop", false)) escreverEstatisticas(); // TEMP-TESTE-FULL
             if (rodando) aviso.fim(); // não toca se o usuário parou a sessão
         } catch (Exception e) {
             registrar("sessão interrompida: " + e.getMessage());
@@ -292,43 +301,64 @@ public class Orquestrador {
         }
     }
 
-    private void processar(PortalDriver driver, Vaga v, boolean zaiAvalia, boolean dryRun) {
+    /** TEMP-TESTE-FULL: resumo da sessão por portal e status, com os motivos de pulada/erro. */
+    private void escreverEstatisticas() {
+        TesteFullLog.ativo = true; // só chega aqui com o checkbox marcado
+        var novas = candidaturas.listar("", "").stream().filter(c -> c.id() > idInicial).toList();
+        StringBuilder sb = new StringBuilder();
+        sb.append("Vagas encontradas nas buscas: ").append(encontradasTotal.get()).append('\n')
+                .append("Já no histórico (ignoradas): ").append(jaNoHistorico.get()).append('\n')
+                .append("Processadas (novas): ").append(processadas.get()).append('\n')
+                .append("Enviadas: ").append(enviadas.get()).append(" · Puladas: ").append(puladas.get())
+                .append(" · Erros/falhas: ").append(erros.get()).append("\n\nPor portal e status:\n");
+        novas.stream().collect(java.util.stream.Collectors.groupingBy(c -> c.portal() + " · " + c.status(),
+                java.util.TreeMap::new, java.util.stream.Collectors.counting()))
+                .forEach((k, v) -> sb.append("  ").append(k).append(": ").append(v).append('\n'));
+        sb.append("\nMotivos de pulada/erro/pendência:\n");
+        novas.stream().filter(c -> !"enviada".equals(c.status()) && !"dry_run".equals(c.status()))
+                .forEach(c -> sb.append("  [").append(c.portal()).append("] ").append(c.status()).append(" — ")
+                        .append(c.empresa()).append(" / ").append(c.cargo()).append(" — ").append(c.motivo()).append('\n'));
+        TesteFullLog.estatisticas(sb.toString());
+    }
+
+    private void pular(Vaga v, String rotulo, String motivo) {
+        candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", motivo);
+        puladas.incrementAndGet();
+        aviso.pulada();
+        registrar("pulada", "vaga pulada: " + rotulo + " (" + motivo + ")", null);
+    }
+
+    private void processar(PortalDriver driver, Vaga v, boolean iaAvalia) {
         processadas.incrementAndGet();
         String rotulo = v.empresa() + " — " + v.cargo();
         registrar("encontrada", "vaga encontrada: " + rotulo, null);
-        Optional<String> descarte = filtro.motivoDescarte(v, LocalDate.now());
+        // modo IA: só a recência é decidida por código; stack, inglês, local e tipo de vaga ficam com a IA
+        Optional<String> descarte = iaAvalia ? filtro.motivoRecencia(v, LocalDate.now()) : filtro.motivoDescarte(v, LocalDate.now());
         if (descarte.isPresent()) {
-            candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", descarte.get());
-            puladas.incrementAndGet();
-            aviso.pulada();
-            registrar("pulada", "vaga pulada: " + rotulo + " (" + descarte.get() + ")", null);
+            pular(v, rotulo, descarte.get());
             return;
         }
         Optional<EscolhaCv.Escolha> escolha = escolhaCv.escolherDefinido(v);
         Optional<Cv> cv = escolha.map(EscolhaCv.Escolha::cv);
-        // stack sem definição clara (nenhuma palavra-chave ou empate): pergunta à z.ai qual CV mandar
-        if (!zaiAvalia && escolha.isPresent() && !escolha.get().definida() && zai.configurado()) {
+        // stack sem definição clara (nenhuma palavra-chave ou empate): pergunta à IA qual CV mandar
+        if (!iaAvalia && escolha.isPresent() && !escolha.get().definida() && ia.configurado()) {
             try {
-                JsonNode r = zai.conversarJson(CV_SYSTEM, avaliaPedido(v));
+                JsonNode r = ia.conversarJson(CV_SYSTEM, avaliaPedido(v));
                 String nomeCv = r.path("cv").asText("");
                 Optional<Cv> sugerido = cvs.todos().stream().filter(c -> c.nome().equalsIgnoreCase(nomeCv)).findFirst();
                 if (sugerido.isPresent()) {
                     cv = sugerido;
-                    registrar("CV indefinido pelas regras — z.ai escolheu " + nomeCv);
+                    registrar("CV indefinido pelas regras — IA escolheu " + nomeCv);
                 }
             } catch (RuntimeException e) {
-                registrar("z.ai indisponível para escolher CV, usando o padrão: " + e.getMessage());
+                registrar("IA indisponível para escolher CV, usando o padrão: " + e.getMessage());
             }
         }
-        if (zaiAvalia) {
+        if (iaAvalia) {
             try {
-                JsonNode r = zai.conversarJson(AVALIA_SYSTEM, avaliaPedido(v));
+                JsonNode r = ia.conversarJson(AVALIA_SYSTEM, avaliaPedido(v));
                 if (!r.path("candidatar").asBoolean(false)) {
-                    String motivo = "z.ai: " + r.path("motivo").asText("fora do perfil");
-                    candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", motivo);
-                    puladas.incrementAndGet();
-                    aviso.pulada();
-                    registrar("pulada", "vaga pulada: " + rotulo + " (" + motivo + ")", null);
+                    pular(v, rotulo, "IA: " + r.path("motivo").asText("fora do perfil"));
                     return;
                 }
                 String nomeCv = r.path("cv").asText("");
@@ -337,7 +367,12 @@ public class Orquestrador {
                     cv = cvs.todos().stream().filter(c -> c.nome().equalsIgnoreCase(nomeCv)).findFirst().or(() -> atual);
                 }
             } catch (RuntimeException e) {
-                registrar("z.ai indisponível na avaliação, seguindo pelas regras: " + e.getMessage());
+                registrar("IA indisponível na avaliação, seguindo pelas regras: " + e.getMessage());
+                Optional<String> regras = filtro.motivoDescarte(v, LocalDate.now());
+                if (regras.isPresent()) {
+                    pular(v, rotulo, regras.get());
+                    return;
+                }
             }
         }
         if (cv.isEmpty()) {
@@ -353,7 +388,7 @@ public class Orquestrador {
         int tentativasLogin = 0;
         while (true) {
             try {
-                d = driver.candidatar(v, cv.get(), dryRun, () -> rodando);
+                d = driver.candidatar(v, cv.get(), kv.booleano(KvRepo.CONFIG, "dry_run", true), () -> rodando); // lê a cada tentativa: o checkbox vale na hora
             } catch (Exception e) {
                 d = new PortalDriver.Desfecho(PortalDriver.Status.ERRO, String.valueOf(e.getMessage()));
             }

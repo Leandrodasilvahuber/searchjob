@@ -32,8 +32,8 @@
   <div class="card">
     <b>Modo de avaliação</b>
     <form th:action="@{/modo}" method="post" class="row">
-      <label><input type="radio" name="modo" value="codigo" th:checked="${modo=='codigo'}" onchange="this.form.submit()"> Por código (regras + banco; z.ai só em situação nova)</label>
-      <label><input type="radio" name="modo" value="zai" th:checked="${modo=='zai'}" onchange="this.form.submit()"> z.ai avalia a adequação da vaga</label>
+      <label><input type="radio" name="modo" value="codigo" th:checked="${modo=='codigo'}" onchange="this.form.submit()"> Por código (regras + banco; a IA só entra em situação nova)</label>
+      <label><input type="radio" name="modo" value="ia" th:checked="${modo=='ia'}" onchange="this.form.submit()"> A IA avalia a adequação da vaga</label>
     </form>
     <form th:action="@{/dryrun}" method="post" class="row" style="margin-top:8px">
       <label><input type="checkbox" th:checked="${dryRun}" onchange="document.getElementById('dr').value=this.checked; this.form.submit()"> Dry-run (preenche mas não envia)</label>
@@ -42,6 +42,10 @@
     <form th:action="@{/naointeragir}" method="post" class="row" style="margin-top:8px">
       <label><input type="checkbox" th:checked="${naoInteragir}" onchange="document.getElementById('ni').value=this.checked; this.form.submit()"> Não interagir (pula a vaga em vez de me chamar; só avisa para logar)</label>
       <input type="hidden" name="ligado" id="ni" th:value="${naoInteragir}">
+    </form>
+    <form th:action="@{/relatorio}" method="post" class="row" style="margin-top:8px">
+      <label><input type="checkbox" th:checked="${relatorio}" onchange="document.getElementById('rl').value=this.checked; this.form.submit()"> Gerar relatório na Área de Trabalho (estatísticas e textos da IA)</label>
+      <input type="hidden" name="ligado" id="rl" th:value="${relatorio}">
     </form>
     <p class="mut" style="margin:6px 0 0">Atenção: no Gupy, mesmo em dry-run o "Salvar e continuar" grava as respostas no seu perfil da Gupy; só o envio final é evitado.</p>
   </div>
@@ -87,8 +91,11 @@
   }
   function desenharLog(log) {
     ultimoLog = log;
-    const ul = $('log'); ul.textContent = '';
-    for (const ev of log) {
+    const ul = $('log');
+    const noFim = ul.scrollHeight - ul.scrollTop - ul.clientHeight < 40;
+    const topo = ul.scrollTop;
+    ul.textContent = '';
+    for (const ev of log.slice().reverse()) {
       const li = document.createElement('li');
       const h = document.createElement('span'); h.className = 'h'; h.textContent = ev.hora; li.appendChild(h);
       const t = document.createElement('span'); t.className = 't-' + ev.tipo; t.textContent = (ROTULO[ev.tipo] ? ROTULO[ev.tipo] + ' ' : '') + ev.texto; li.appendChild(t);
@@ -99,6 +106,7 @@
       }
       ul.appendChild(li);
     }
+    ul.scrollTop = noFim ? ul.scrollHeight : topo;
   }
   function desenharImpedimento(c) {
     $('impedimento').hidden = !c;

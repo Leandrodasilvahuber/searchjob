@@ -48,7 +48,7 @@ verdade: o que você apagar na tela não volta. Para reimportar, apague a chave 
 2. No **Painel**, deixe o **dry-run ligado** (é o padrão) e `max_vagas` pequeno (3 a 5).
 3. Clique em **▶ Iniciar busca**. O sistema abre o Firefox do robô (perfil próprio em `data/firefox-profile`). Faça login
    nos portais nessa janela; a sessão fica salva.
-4. Acompanhe o log do Painel e a aba **Pendências**. Confira o que ele preencheu e, em **Textos da z.ai**, o que foi escrito.
+4. Acompanhe o log do Painel e a aba **Pendências**. Confira o que ele preencheu e, em **Textos da IA**, o que foi escrito.
 5. Quando estiver satisfeito, desmarque o dry-run e rode de novo.
 
 ## Como funciona
@@ -61,7 +61,7 @@ buscar vagas (API/HTML/Firefox)
        já enviada/pulada (ou ensaiada, em dry-run)?  → ignora (compara pelo ID da vaga)
        filtros por código (recência, estágio, inglês oral, stack, fora do Brasil) → registra "pulada"
        escolha do CV
-       [modo z.ai] a z.ai decide se vale candidatar e qual CV
+       [modo IA] a IA decide se vale candidatar e qual CV
        candidatar (Firefox): preenche campos → avança → envia → confere o texto de sucesso
        registra no histórico, toca o som
 ```
@@ -70,18 +70,18 @@ buscar vagas (API/HTML/Firefox)
 
 | Modo | Quem decide se a vaga serve e qual CV |
 |---|---|
-| **Por código** (padrão) | Regras e banco. A z.ai só é chamada para pergunta nova, texto livre ou CV indefinido. |
-| **z.ai avalia** | A z.ai lê a vaga, compara com o CV e as preferências e decide candidatar/pular e o CV. |
+| **Por código** (padrão) | Regras e banco. A IA só é chamada para pergunta nova, texto livre ou CV indefinido. |
+| **IA avalia** | A IA lê a vaga, compara com o CV e as preferências e decide candidatar/pular e o CV. |
 
-Se `modo = zai` mas não há chave, ele avisa no log e volta ao modo por código.
+Se `modo = ia` mas não há chave, ele avisa no log e volta ao modo por código.
 
 ### Escolha do CV
 
 1. Título com **arquiteto, líder, tech lead, staff, principal ou coordenador** → CV *Sistemas Distribuídos*.
 2. Senão, pontua as palavras-chave de cada CV (aba **CVs**) no título e na descrição. A comparação é por **palavra
    inteira** (`java` não casa com `javascript`; sufixos `js`/`boot` são aceitos; termos com 9+ letras casam por radical).
-3. Vitória clara → esse CV. **Sem palavra-chave ou empate → escolha indefinida: pergunta à z.ai** qual CV mandar.
-4. Se a z.ai não está configurada ou falha, usa o CV *NodeJS* (padrão em empate, como na skill).
+3. Vitória clara → esse CV. **Sem palavra-chave ou empate → escolha indefinida: pergunta à IA** qual CV mandar.
+4. Se a IA não está configurada ou falha, usa o CV *NodeJS* (padrão em empate, como na skill).
 
 Os seus CVs são por stack e não por nível: pleno ou sênior sozinho não troca de CV; a stack decide.
 
@@ -89,17 +89,17 @@ Os seus CVs são por stack e não por nível: pleno ou sênior sozinho não troc
 
 Cada pergunta de formulário passa por `SituacaoService`:
 
-1. **Dado sensível** (RG, nome do pai, senha, dados bancários) → nunca vai para a z.ai; o sistema chama você.
+1. **Dado sensível** (RG, nome do pai, senha, dados bancários) → nunca vai para a IA; o sistema chama você.
 2. **Texto livre** (qualquer `textarea` ou pergunta aberta: *apresente-se, conte sobre, por que, motivação, carta…*)
-   → a **z.ai escreve sob medida para cada vaga**, usando a descrição da vaga e o texto do CV escolhido, sem pedir
-   confirmação (para manter o fluxo automático). Cada texto fica registrado em **Textos da z.ai**. A instrução usada
+   → a **IA escreve sob medida para cada vaga**, usando a descrição da vaga e o texto do CV escolhido, sem pedir
+   confirmação (para manter o fluxo automático). Cada texto fica registrado em **Textos da IA**. A instrução usada
    (tipo `personalizada`) é editável em **Situações**. Se já existia uma resposta aprovada parecida, ela entra no prompt
    como base de fatos e de tom.
 3. **Pergunta curta** (pretensão, CNH, anos de experiência…):
    - achou situação ativa equivalente → aplica **sem LLM**;
-   - não achou → pergunta à **z.ai**. Se ela resolve, vira **pendência de confirmação** (som + tela); ao você confirmar
-     ou corrigir, vira regra (`origem = zai_confirmada`);
-   - se a z.ai não resolve (ou não há chave), vira **pendência de ajuda**; o que você responder vira regra
+   - não achou → pergunta à **IA**. Se ela resolve, vira **pendência de confirmação** (som + tela); ao você confirmar
+     ou corrigir, vira regra (`origem = ia_confirmada`);
+   - se a IA não resolve (ou não há chave), vira **pendência de ajuda**; o que você responder vira regra
      (`origem = usuario`).
 4. Pendências abertas da mesma pergunta são reaproveitadas, não duplicadas.
 
@@ -108,17 +108,17 @@ diferem forem só conectivos. Assim *experiência com Go* nunca reaproveita a re
 a de *CNH B*.
 
 **Privacidade no prompt:** CPF, RG, filiação, nascimento e dados bancários são removidos dos dados e das respostas
-enviados à z.ai. O CPF continua disponível para preencher formulários que o peçam.
+enviados à IA. O CPF continua disponível para preencher formulários que o peçam.
 
 ### Dry-run
 
 Ligado por padrão. O robô preenche tudo e **para antes do botão de envio**, marcando a vaga como `dry_run`. Vagas
-ensaiadas não são refeitas em novos ensaios (não repete as chamadas à z.ai); no envio real elas são tentadas de novo.
+ensaiadas não são refeitas em novos ensaios (não repete as chamadas à IA); no envio real elas são tentadas de novo.
 No Gupy, mesmo em dry-run, "Salvar e continuar" grava as respostas no seu perfil da Gupy; só o envio final é evitado.
 
 ### Quando ele chama você
 
-Login, CAPTCHA, dado sensível, pergunta sem resposta, confirmação de resposta da z.ai. Se um portal pedir login ou
+Login, CAPTCHA, dado sensível, pergunta sem resposta, confirmação de resposta da IA. Se um portal pedir login ou
 CAPTCHA, **só aquele portal** fica de fora da rodada; os demais seguem. Faça o login na janela do Firefox e inicie de novo.
 
 ### Deduplicação
@@ -132,15 +132,15 @@ em "enviar", para nunca candidatar duas vezes.
 
 | Aba | O que faz |
 |---|---|
-| **Painel** | Iniciar/Parar, modo (código ou z.ai), dry-run, contadores, log ao vivo e alerta de pendências. |
-| **Pendências** | Respostas da z.ai para confirmar/corrigir e perguntas que ela não resolveu. |
+| **Painel** | Iniciar/Parar, modo (código ou IA), dry-run, contadores, log ao vivo e alerta de pendências. |
+| **Pendências** | Respostas da IA para confirmar/corrigir e perguntas que ela não resolveu. |
 | **Histórico** | Todas as vagas com status (`enviada`, `pulada`, `erro`, `pendente`, `dry_run`, `aguardando_usuario`), filtro por portal/status, link e exclusão. |
 | **Situações** | Regras aprendidas: listar, editar, ativar/desativar, excluir e criar. |
-| **Textos da z.ai** | Cada texto livre escrito por vaga, com vaga, CV e data. |
+| **Textos da IA** | Cada texto livre escrito por vaga, com vaga, CV e data. |
 | **CVs** | Palavras-chave de stack e texto extraído de cada CV; editar e excluir. |
 | **Dados fixos** | Nome, e-mail, telefone etc. (chave/valor, editável). |
 | **Preferências** | Pretensão, recência, termos, filtros (chave/valor, editável). |
-| **Configuração** | Modo, portais, dry-run, `max_vagas`, dados da z.ai. |
+| **Configuração** | Modo, portais, dry-run, `max_vagas`, dados da IA. |
 | **⏻ Encerrar serviço** | Para a sessão, fecha o Firefox e derruba o serviço. |
 
 ## Configuração
@@ -151,7 +151,7 @@ em "enviar", para nunca candidatar duas vezes.
 |---|---|---|
 | `termos` | full stack, Vue.js, Laravel, PHP, React, Node.js, backend | Termos de busca, em ordem |
 | `recencia_dias` | 14 | Descarta vagas mais antigas |
-| `pretensao_pj` / `pretensao_clt` | 10000 / 7000 | Usadas pela z.ai nas respostas |
+| `pretensao_pj` / `pretensao_clt` | 10000 / 7000 | Usadas pela IA nas respostas |
 | `excluir_titulos` | estágio, estagiário, jovem aprendiz, banco de talentos | Pula pelo título |
 | `exige_ingles_oral` | calls/reuniões/entrevista em inglês, fluência oral… | Pula pelo texto da vaga |
 | `stack_proibida` | python, .net, golang, kotlin, angular… | Pula pelo **título** |
@@ -162,7 +162,7 @@ Os filtros comparam **palavra inteira** (`.net` não pega "Kubernetes"; "inglês
 
 | Chave | Padrão | Uso |
 |---|---|---|
-| `modo` | codigo | `codigo` ou `zai` |
+| `modo` | codigo | `codigo` ou `ia` |
 | `portais` | gupy,programathor,catho,indeed | Portais ativos; nome desconhecido é ignorado com aviso |
 | `dry_run` | true | Preenche sem enviar. **Lido no início da sessão.** |
 | `max_vagas` | 30 | Vagas listadas **por portal e por termo** (não é limite de candidaturas) |
@@ -208,16 +208,16 @@ página ou em duas etapas (`LoginAutomatico`).
 
 ## Segurança
 
-O app guarda CPF, nome da mãe, CVs e a chave da z.ai, e pode enviar candidaturas. Por isso:
+O app guarda CPF, nome da mãe, CVs e a chave da IA, e pode enviar candidaturas. Por isso:
 
 - Escuta só em `127.0.0.1`.
 - Um filtro (`OrigemLocalFilter`) aceita apenas `Host` de loopback (barra DNS rebinding) e exige `Origin`/`Referer` de
   loopback em todo POST (barra CSRF vindo de outros sites abertos no navegador).
-- A chave da z.ai nunca é renderizada na página.
+- A chave da IA nunca é renderizada na página.
 - Não é autenticação: **qualquer processo na sua máquina** ainda acessa o app.
-- Dados sensíveis (RG, pai, banco) nunca vão à z.ai e sempre chamam você.
+- Dados sensíveis (RG, pai, banco) nunca vão à IA e sempre chamam você.
 - **Credenciais dos portais** (tela *Credenciais*): senha cifrada com AES-256-GCM no SQLite; a chave fica em
-  `data/cofre.key` (permissão 600), separada do banco. A senha nunca aparece na tela nem vai à z.ai. Quem já tem acesso
+  `data/cofre.key` (permissão 600), separada do banco. A senha nunca aparece na tela nem vai à IA. Quem já tem acesso
   à sua conta de usuário na máquina consegue ler a chave: não é proteção contra isso.
 - `data/` (banco, perfil do Firefox, logs) está no `.gitignore`.
 
@@ -229,9 +229,9 @@ SQLite em `data/searchjob.db` (criado e migrado por `schema.sql` na subida).
 |---|---|
 | `dado_fixo`, `preferencia`, `config` | Chave/valor editáveis na tela |
 | `cv` | Nome, PDF, texto extraído, palavras-chave |
-| `situacao` | Regras: pergunta, resposta/instrução, `tipo` (`pergunta`/`personalizada`), `origem` (`md`/`usuario`/`zai`/`zai_confirmada`), `status` (`ativa`/`inativa`/`pendente_confirmacao`/`aguardando_usuario`), nº de usos |
+| `situacao` | Regras: pergunta, resposta/instrução, `tipo` (`pergunta`/`personalizada`), `origem` (`md`/`usuario`/`ia`/`ia_confirmada`), `status` (`ativa`/`inativa`/`pendente_confirmacao`/`aguardando_usuario`), nº de usos |
 | `candidatura` | Portal, empresa, cargo, URL, CV usado, status, motivo, data |
-| `texto_gerado` | Textos livres escritos pela z.ai, por vaga |
+| `texto_gerado` | Textos livres escritos pela IA, por vaga |
 
 ## Testes e qualidade
 
@@ -243,11 +243,11 @@ mvn verify    # tudo acima + análise estática + e2e (58 testes no total)
 | Camada | O que cobre | Onde |
 |---|---|---|
 | **Unitários** (sem Spring/banco) | Normalização e equivalência de textos, chave de vaga, escolha de CV (`casa`/`pontuar`), `FiltroVaga` com `KvRepo` simulado, parsers de ProgramaThor/Catho/Gupy com HTML fixo, parsing do `.md`, filtro de origem | `TextoTest`, `ChaveVagaTest`, `EscolhaCvUnitTest`, `FiltroVagaUnitTest`, `ParsersPortaisTest`, `MdParsingTest`, `OrigemLoopbackTest` |
-| **Integração** (Spring + SQLite temporário) | Fluxo de situações (aplica, z.ai resolve→confirma, z.ai não resolve→usuário, sem duplicar pendência, texto sob medida), importação do `.md` real, filtros e escolha de CV, filtro de segurança, busca real no Gupy e nas listagens (abortam sem rede) | `SituacaoServiceTest`, `MdImporterTest`, `FiltroEscolhaTest`, `OrigemLocalFilterTest`, `GupyDriverTest`, `PortaisParseTest` |
+| **Integração** (Spring + SQLite temporário) | Fluxo de situações (aplica, IA resolve→confirma, IA não resolve→usuário, sem duplicar pendência, texto sob medida), importação do `.md` real, filtros e escolha de CV, filtro de segurança, busca real no Gupy e nas listagens (abortam sem rede) | `SituacaoServiceTest`, `MdImporterTest`, `FiltroEscolhaTest`, `OrigemLocalFilterTest`, `GupyDriverTest`, `PortaisParseTest` |
 | **Estática** | `javac -Xlint:all -Werror`, **Checkstyle** (`checkstyle.xml`) e **SpotBugs** (`spotbugs-exclude.xml`); falham o build | `mvn verify` |
 | **E2E — sessão** | Iniciar → busca → filtros → CV → candidatura → histórico, pela interface HTTP com um portal simulado: portal deslogado é pulado, retomada sem duplicar, dry-run, dedupe entre formatos de link | `e2e/SessaoE2ETest` |
 | **E2E — interface** | Todas as telas e formulários (CRUD de situações e CVs, pendências, modo, dry-run, chave secreta, filtros, botão encerrar) | `e2e/InterfaceE2ETest` |
-| **E2E — navegador** | **Firefox headless real** contra um formulário local: preenche campo curto pela resposta salva e textarea pela z.ai, para antes do envio no dry-run, envia de verdade, distingue campo de senha visível/oculto e reconhece "já se candidatou". É ignorado se o Firefox/geckodriver não subirem | `e2e/FormularioFirefoxE2ETest` |
+| **E2E — navegador** | **Firefox headless real** contra um formulário local: preenche campo curto pela resposta salva e textarea pela IA, para antes do envio no dry-run, envia de verdade, distingue campo de senha visível/oculto e reconhece "já se candidatou". É ignorado se o Firefox/geckodriver não subirem | `e2e/FormularioFirefoxE2ETest` |
 
 Os e2e rodam no `verify` (failsafe), separados do `test` (surefire). Rodar um só: `mvn verify -Dit.test=SessaoE2ETest`.
 
@@ -269,8 +269,8 @@ src/main/java/com/huber/searchjob/
              NavegadorFirefox  Selenium, perfil persistente, headless opcional
              FiltroVaga, EscolhaCv, ChaveVaga, Texto, Html
              SituacaoService   aprendizado de situações e textos sob medida
-             CvContexto        monta o contexto (sem dados sensíveis) para a z.ai
-             ZaiClient         HTTP chat/completions
+             CvContexto        monta o contexto (sem dados sensíveis) para a IA
+             IaClient         HTTP chat/completions
              Aviso             sons em fila
              Encerramento      derruba o serviço
   web/       PainelController, CadastrosController, OrigemLocalFilter
@@ -280,12 +280,12 @@ src/main/resources/  schema.sql, application.yml, templates/ (Thymeleaf)
 ## Estado e limitações
 
 Funciona e está testado (unitário, integração, e2e e estática): importação, telas, aprendizado de situações, textos sob
-medida (com a z.ai simulada), escolha de CV, filtros, dedupe, dry-run, sons, botão de encerrar, segurança local e o laço
+medida (com a IA simulada), escolha de CV, filtros, dedupe, dry-run, sons, botão de encerrar, segurança local e o laço
 de candidatura num Firefox real contra um formulário local.
 
 **Ainda não validado / limitado:**
 
-- A **z.ai nunca foi chamada de verdade** (URL e modelo são valores iniciais a confirmar; nos testes ela é simulada).
+- A **IA nunca foi chamada de verdade** (URL e modelo são valores iniciais a confirmar; nos testes ela é simulada).
 - O **fluxo real de cada portal** (Gupy, ProgramaThor, Catho, Indeed) nunca rodou ponta a ponta, pois depende do seu
   login. Os seletores de botão são o ponto mais provável de ajuste. Comece sempre com dry-run e `max_vagas` pequeno.
 - **Radio/select/checkbox** (ex.: perguntas Sim/Não) não são preenchidos; a vaga cai em erro ou em "preciso de você".

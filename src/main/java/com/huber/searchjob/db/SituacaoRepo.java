@@ -8,7 +8,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * Situações aprendidas. status: ativa | inativa | pendente_confirmacao | aguardando_usuario.
- * origem: md | usuario | zai_confirmada | zai.
+ * origem: md | usuario | ia_confirmada | ia.
  */
 @Repository
 public class SituacaoRepo {
@@ -44,7 +44,7 @@ public class SituacaoRepo {
         return jdbc.sql("SELECT " + COLS + " FROM situacao WHERE id = ?").param(id).query(MAP).optional();
     }
 
-    /** Pendência ainda aberta (z.ai respondeu ou aguardando o usuário) para a mesma pergunta. */
+    /** Pendência ainda aberta (IA respondeu ou aguardando o usuário) para a mesma pergunta. */
     public Optional<Situacao> pendentePorHash(String hash) {
         return jdbc.sql("SELECT " + COLS + " FROM situacao WHERE hash = ? AND status IN ('pendente_confirmacao','aguardando_usuario') "
                         + "ORDER BY id DESC LIMIT 1").param(hash).query(MAP).optional();

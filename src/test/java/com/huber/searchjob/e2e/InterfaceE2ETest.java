@@ -68,16 +68,16 @@ class InterfaceE2ETest extends BaseIT {
     }
 
     @Test
-    void pendenciaConfirmadaViraRegraComOrigemZai() throws Exception {
+    void pendenciaConfirmadaViraRegraComOrigemIa() throws Exception {
         long id = situacoes.inserir("Gupy", "pergunta", "Pergunta pendente E2E", Texto.hash("Pergunta pendente E2E"),
-                "resposta da zai", "zai", SituacaoRepo.PENDENTE_CONFIRMACAO, "");
+                "resposta da ia", "ia", SituacaoRepo.PENDENTE_CONFIRMACAO, "");
         assertTrue(http.get("/pendencias").corpo().contains("Pergunta pendente E2E"));
         assertTrue(http.get("/").corpo().contains("Preciso de você"));
 
         http.post("/pendencias/" + id + "/confirmar", Map.of("resposta", "resposta corrigida"));
         Situacao s = situacoes.porId(id).orElseThrow();
         assertEquals("ativa", s.status());
-        assertEquals("zai_confirmada", s.origem());
+        assertEquals("ia_confirmada", s.origem());
         assertEquals("resposta corrigida", s.promptOuResposta());
     }
 
@@ -93,8 +93,8 @@ class InterfaceE2ETest extends BaseIT {
 
     @Test
     void configuracaoModoDryRunEChaveSecreta() throws Exception {
-        http.post("/modo", Map.of("modo", "zai"));
-        assertEquals("zai", kv.get(KvRepo.CONFIG, "modo", ""));
+        http.post("/modo", Map.of("modo", "ia"));
+        assertEquals("ia", kv.get(KvRepo.CONFIG, "modo", ""));
         http.post("/modo", Map.of("modo", "codigo"));
         assertEquals("codigo", kv.get(KvRepo.CONFIG, "modo", ""));
         http.post("/dryrun", Map.of("ligado", "false"));

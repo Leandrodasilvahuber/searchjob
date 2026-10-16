@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service;
 /**
  * Núcleo do aprendizado:
  * 1) acha situação ativa (hash exato ou similaridade) e aplica sem LLM;
- * 2) senão pergunta à z.ai; se ela resolve, fica pendente_confirmacao e chama o usuário;
+ * 2) senão pergunta à IA; se ela resolve, fica pendente_confirmacao e chama o usuário;
  * 3) se ela não resolve, fica aguardando_usuario e o usuário relata a resposta.
  */
 @Service
@@ -30,18 +30,18 @@ public class SituacaoService {
 
     private final SituacaoRepo repo;
     private final KvRepo kv;
-    private final ZaiClient zai;
+    private final IaClient ia;
     private final CvContexto cvContexto;
     private final Aviso aviso;
     private final TextoGeradoRepo textos;
 
-    public SituacaoService(SituacaoRepo repo, KvRepo kv, ZaiClient zai, CvContexto cvContexto, Aviso aviso,
+    public SituacaoService(SituacaoRepo repo, KvRepo kv, IaClient ia, CvContexto cvContexto, Aviso aviso,
                            TextoGeradoRepo textos) {
         this.aviso = aviso;
         this.textos = textos;
         this.repo = repo;
         this.kv = kv;
-        this.zai = zai;
+        this.ia = ia;
         this.cvContexto = cvContexto;
     }
 
@@ -73,7 +73,7 @@ public class SituacaoService {
     static final String INSTRUCAO_PADRAO =
             "Escreva uma resposta personalizada para esta vaga, destacando as experiências do currículo mais relevantes para ela.";
 
-    /** Texto livre (área de texto ou pergunta aberta): a z.ai escreve sob medida para cada vaga em vez de reaproveitar. */
+    /** Texto livre (área de texto ou pergunta aberta): a IA escreve sob medida para cada vaga em vez de reaproveitar. */
     public static boolean discursiva(String pergunta, boolean areaDeTexto) {
         if (areaDeTexto) return true;
         String n = Texto.normalizar(pergunta);
@@ -87,7 +87,7 @@ public class SituacaoService {
      */
     public Resultado resolver(String portal, String pergunta, String contextoVaga, Cv cv, boolean areaDeTexto,
                               BooleanSupplier continuar) {
-        if (!sensivel(pergunta) && discursiva(pergunta, areaDeTexto) && zai.configurado()) {
+        if (!sensivel(pergunta) && discursiva(pergunta, areaDeTexto) && ia.configurado()) {
             Resultado r = gerarPersonalizado(portal, pergunta, contextoVaga, cv);
             if (r != null) return r;
         }
@@ -114,16 +114,16 @@ public class SituacaoService {
                     SituacaoRepo.PENDENTE_CONFIRMACAO.equals(aberta.get().status()) ? Tipo.CONFIRMADA_PELO_USUARIO : Tipo.RESPONDIDA_PELO_USUARIO,
                     continuar);
         }
-        if (zai.configurado()) {
+        if (ia.configurado()) {
             JsonNode r;
             try {
-                r = zai.conversarJson(SYSTEM, montarPedido(pergunta, contextoVaga));
+                r = ia.conversarJson(SYSTEM, montarPedido(pergunta, contextoVaga));
             } catch (RuntimeException e) {
                 r = null;
             }
             if (r != null && r.path("resolvido").asBoolean(false) && !r.path("resposta").asText("").isBlank()) {
                 id = repo.inserir(portal, "pergunta", pergunta, hash, r.path("resposta").asText(),
-                        "zai", SituacaoRepo.PENDENTE_CONFIRMACAO, contextoVaga);
+                        "ia", SituacaoRepo.PENDENTE_CONFIRMACAO, contextoVaga);
                 if (naoInteragir()) return new Resultado(Tipo.SEM_RESPOSTA, null, id);
                 aviso.chamarUsuario();
                 return aguardar(id, Tipo.CONFIRMADA_PELO_USUARIO, continuar);
@@ -171,7 +171,7 @@ public class SituacaoService {
             repo.incrementarUso(id);
         } else {
             id = repo.inserir(portal, "personalizada", pergunta, Texto.hash(pergunta), INSTRUCAO_PADRAO,
-                    "zai", SituacaoRepo.ATIVA, "");
+                    "ia", SituacaoRepo.ATIVA, "");
         }
         try {
             String pedido = "PERGUNTA/CAMPO:\n" + pergunta + "\n\nINSTRUÇÕES DO CANDIDATO PARA ESTE TIPO DE CAMPO:\n" + instrucao
@@ -180,12 +180,12 @@ public class SituacaoService {
                     + "\n\nDADOS FIXOS:\n" + cvContexto.dadosParaPrompt()
                     + "\n\nCURRÍCULO ESCOLHIDO PARA ESTA VAGA:\n"
                     + (cv != null && cv.textoExtraido() != null ? cv.textoExtraido() : cvContexto.textoCvs());
-            String texto = zai.conversar(SYSTEM_TEXTO, pedido).trim();
+            String texto = ia.conversar(SYSTEM_TEXTO, pedido).trim();
             if (texto.isBlank()) return null;
             textos.inserir(portal, pergunta, primeiraLinha(contextoVaga), cv == null ? "" : cv.nome(), texto);
             return new Resultado(Tipo.APLICADA, texto, id);
         } catch (RuntimeException e) {
-            return null; // z.ai fora do ar: cai no fluxo normal (resposta salva ou chamar o usuário)
+            return null; // IA fora do ar: cai no fluxo normal (resposta salva ou chamar o usuário)
         }
     }
 
@@ -209,13 +209,13 @@ public class SituacaoService {
             sem títulos e sem aspas. Responda SOMENTE com o texto final, pronto para colar no campo.
             """;
 
-    /** Usuário confirma (ou corrige) a resposta da z.ai: vira regra ativa, origem zai_confirmada. */
+    /** Usuário confirma (ou corrige) a resposta da IA: vira regra ativa, origem ia_confirmada. */
     public void confirmar(long id, String respostaFinal) {
         Situacao s = repo.porId(id).orElseThrow();
-        repo.atualizar(id, s.padraoPergunta(), s.hash(), respostaFinal, SituacaoRepo.ATIVA, "zai_confirmada");
+        repo.atualizar(id, s.padraoPergunta(), s.hash(), respostaFinal, SituacaoRepo.ATIVA, "ia_confirmada");
     }
 
-    /** Usuário relata a resposta quando a z.ai não resolveu: vira regra ativa, origem usuario. */
+    /** Usuário relata a resposta quando a IA não resolveu: vira regra ativa, origem usuario. */
     public void responder(long id, String resposta) {
         Situacao s = repo.porId(id).orElseThrow();
         repo.atualizar(id, s.padraoPergunta(), s.hash(), resposta, SituacaoRepo.ATIVA, "usuario");

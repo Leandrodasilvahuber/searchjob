@@ -161,7 +161,7 @@ public class CadastrosController {
         return "redirect:/historico";
     }
 
-    // --- textos que a z.ai escreveu por vaga ---
+    // --- textos que a IA escreveu por vaga ---
 
     @GetMapping("/textos")
     public String textosTela(Model m) {

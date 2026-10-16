@@ -3,7 +3,7 @@ package com.huber.searchjob;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import com.huber.searchjob.db.KvRepo;
-import com.huber.searchjob.engine.ZaiClient;
+import com.huber.searchjob.engine.IaClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -32,7 +32,7 @@ class ModelosAoVivoTest {
             kv.put(KvRepo.CONFIG, "openrouter_modelos", m.trim());
             long t = System.currentTimeMillis();
             try {
-                String r = new ZaiClient(kv).conversar(system, user);
+                String r = new IaClient(kv).conversar(system, user);
                 System.out.printf("LIVE %s OK %.1fs%n%s%n%n", m, (System.currentTimeMillis() - t) / 1000.0, r);
                 assertFalse(r.isBlank());
             } catch (RuntimeException e) {

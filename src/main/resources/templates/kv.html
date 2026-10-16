@@ -5,7 +5,7 @@
 <nav th:replace="~{layout :: menu(${pagina})}"></nav>
 <main>
   <h1 th:text="${tabela=='dado_fixo'} ? 'Dados fixos' : (${tabela=='preferencia'} ? 'Preferências' : 'Configuração')"></h1>
-  <p class="mut" th:if="${tabela=='config'}">modo: codigo | zai · portais: gupy · dry_run: true/false · openrouter_chave: sua chave do OpenRouter.</p>
+  <p class="mut" th:if="${tabela=='config'}">modo: codigo | ia · portais: gupy · dry_run: true/false · openrouter_chave: sua chave do OpenRouter.</p>
   <div class="card">
     <table>
       <tr><th style="width:28%">Chave</th><th>Valor</th><th style="width:150px"></th></tr>

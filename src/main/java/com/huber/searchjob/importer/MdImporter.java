@@ -109,6 +109,7 @@ public class MdImporter {
         padrao(KvRepo.CONFIG, "openrouter_chave", "");
         padrao(KvRepo.CONFIG, "max_vagas", "30");
         padrao(KvRepo.CONFIG, "nao_interagir", "false");
+        padrao(KvRepo.CONFIG, "relatorio_desktop", "false");
     }
 
     private void padrao(String tabela, String chave, String valor) {

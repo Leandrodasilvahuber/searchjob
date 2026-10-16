@@ -5,7 +5,7 @@
 <nav th:replace="~{layout :: menu(${pagina})}"></nav>
 <main>
   <h1>Currículos</h1>
-  <p class="mut">As palavras-chave (separadas por vírgula) decidem qual CV usar; em empate vale o NodeJS. O texto extraído é o que a z.ai lê.</p>
+  <p class="mut">As palavras-chave (separadas por vírgula) decidem qual CV usar; em empate vale o NodeJS. O texto extraído é o que a IA lê.</p>
   <p class="mut" th:if="${itens.isEmpty()}">Nenhum CV importado. Confira <code>searchjob.pasta-origem</code> no application.yml.</p>
   <div class="card" th:each="c : ${itens}">
     <form th:action="@{/cvs/{id}/salvar(id=${c.id})}" method="post">

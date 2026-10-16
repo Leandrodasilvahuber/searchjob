@@ -4,7 +4,7 @@ import java.util.List;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/** Registro de cada texto que a z.ai escreveu sob medida para uma vaga (auditoria do que foi enviado). */
+/** Registro de cada texto que a IA escreveu sob medida para uma vaga (auditoria do que foi enviado). */
 @Repository
 public class TextoGeradoRepo {
     public record TextoGerado(long id, String portal, String pergunta, String vaga, String cv, String texto, String criadoEm) {}

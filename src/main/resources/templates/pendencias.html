@@ -5,7 +5,7 @@
 <nav th:replace="~{layout :: menu(${pagina})}"></nav>
 <main>
   <h1>Pendências</h1>
-  <h2>A z.ai respondeu — confirme ou corrija</h2>
+  <h2>A IA respondeu — confirme ou corrija</h2>
   <p class="mut" th:if="${confirmar.isEmpty()}">Nada para confirmar.</p>
   <div class="card chamando" th:each="s : ${confirmar}">
     <b th:text="${s.padraoPergunta}"></b>
@@ -16,7 +16,7 @@
       <button class="del" th:formaction="@{/situacoes/{id}/excluir(id=${s.id})}">Descartar</button>
     </form>
   </div>
-  <h2>A z.ai não resolveu — me diga o que responder</h2>
+  <h2>A IA não resolveu — me diga o que responder</h2>
   <p class="mut" th:if="${ajuda.isEmpty()}">Nada aguardando.</p>
   <div class="card chamando" th:each="s : ${ajuda}">
     <b th:text="${s.padraoPergunta}"></b>

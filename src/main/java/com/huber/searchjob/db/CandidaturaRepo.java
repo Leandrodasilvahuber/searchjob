@@ -33,7 +33,7 @@ public class CandidaturaRepo {
 
     /**
      * URLs de vagas já tratadas (enviada/pulada). Em dry-run entram também as vagas já ensaiadas, para não
-     * repetir o preenchimento (e as chamadas à z.ai) a cada ensaio.
+     * repetir o preenchimento (e as chamadas à IA) a cada ensaio.
      */
     public List<String> urlsProcessadas(boolean incluirDryRun) {
         return jdbc.sql("SELECT url FROM candidatura WHERE url IS NOT NULL AND status IN ('enviada','pulada'"
