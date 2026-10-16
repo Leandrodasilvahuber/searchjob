@@ -42,6 +42,12 @@ public class SituacaoRepo {
         return jdbc.sql("SELECT " + COLS + " FROM situacao WHERE id = ?").param(id).query(MAP).optional();
     }
 
+    /** Pendência ainda aberta (z.ai respondeu ou aguardando o usuário) para a mesma pergunta. */
+    public Optional<Situacao> pendentePorHash(String hash) {
+        return jdbc.sql("SELECT " + COLS + " FROM situacao WHERE hash = ? AND status IN ('pendente_confirmacao','aguardando_usuario') "
+                        + "ORDER BY id DESC LIMIT 1").param(hash).query(MAP).optional();
+    }
+
     public Optional<Situacao> ativaPorHash(String hash) {
         return jdbc.sql("SELECT " + COLS + " FROM situacao WHERE hash = ? AND status = 'ativa' ORDER BY id DESC LIMIT 1")
                 .param(hash).query(MAP).optional();
@@ -49,11 +55,10 @@ public class SituacaoRepo {
 
     public long inserir(String portal, String tipo, String padrao, String hash, String resposta,
                         String origem, String status, String contexto) {
-        jdbc.sql("INSERT INTO situacao(portal, tipo, padrao_pergunta, hash, prompt_ou_resposta, origem, status, contexto) "
-                        + "VALUES (?,?,?,?,?,?,?,?)")
+        return jdbc.sql("INSERT INTO situacao(portal, tipo, padrao_pergunta, hash, prompt_ou_resposta, origem, status, contexto) "
+                        + "VALUES (?,?,?,?,?,?,?,?) RETURNING id")
                 .param(portal).param(tipo).param(padrao).param(hash).param(resposta)
-                .param(origem).param(status).param(contexto).update();
-        return jdbc.sql("SELECT last_insert_rowid()").query(Long.class).single();
+                .param(origem).param(status).param(contexto).query(Long.class).single();
     }
 
     public void atualizar(long id, String padrao, String hash, String resposta, String status, String origem) {

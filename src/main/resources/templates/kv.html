@@ -12,7 +12,11 @@
       <tr th:each="e : ${itens}">
         <form th:action="@{/kv/{t}(t=${tabela})}" method="post">
           <td><b th:text="${e.key}"></b><input type="hidden" name="chave" th:value="${e.key}"></td>
-          <td><input th:type="${segredos.contains(e.key)} ? 'password' : 'text'" name="valor" th:value="${e.value}"></td>
+          <td>
+            <input th:if="${segredos.contains(e.key)}" type="password" name="valor" value="" autocomplete="new-password"
+                   th:placeholder="${e.value.isEmpty()} ? 'não definido' : 'definido — digite para trocar'">
+            <input th:unless="${segredos.contains(e.key)}" type="text" name="valor" th:value="${e.value}">
+          </td>
           <td class="row">
             <button>Salvar</button>
             <button class="del" formaction="#" th:formaction="@{/kv/{t}/excluir(t=${tabela})}">Excluir</button>

@@ -7,7 +7,9 @@ import com.huber.searchjob.db.SituacaoRepo;
 import com.huber.searchjob.db.TextoGeradoRepo;
 import com.huber.searchjob.engine.SituacaoService;
 import com.huber.searchjob.engine.Texto;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -41,8 +43,11 @@ public class CadastrosController {
 
     @GetMapping("/kv/{tabela}")
     public String kvTela(@PathVariable String tabela, Model m) {
+        KvRepo.valida(tabela);
+        Map<String, String> itens = new LinkedHashMap<>(kv.todos(tabela));
+        SEGREDOS.forEach(k -> itens.computeIfPresent(k, (a, v) -> v.isBlank() ? "" : "definido"));
         m.addAttribute("tabela", tabela);
-        m.addAttribute("itens", kv.todos(tabela));
+        m.addAttribute("itens", itens);
         m.addAttribute("segredos", SEGREDOS);
         m.addAttribute("pagina", tabela);
         return "kv";
@@ -50,12 +55,15 @@ public class CadastrosController {
 
     @PostMapping("/kv/{tabela}")
     public String kvSalvar(@PathVariable String tabela, @RequestParam String chave, @RequestParam String valor) {
-        if (!chave.isBlank()) kv.put(tabela, chave.trim(), valor);
+        KvRepo.valida(tabela);
+        // segredo em branco = manter o atual (o campo nunca mostra o valor guardado)
+        if (!chave.isBlank() && !(SEGREDOS.contains(chave.trim()) && valor.isBlank())) kv.put(tabela, chave.trim(), valor);
         return "redirect:/kv/" + tabela;
     }
 
     @PostMapping("/kv/{tabela}/excluir")
     public String kvExcluir(@PathVariable String tabela, @RequestParam String chave) {
+        KvRepo.valida(tabela);
         kv.remover(tabela, chave);
         return "redirect:/kv/" + tabela;
     }

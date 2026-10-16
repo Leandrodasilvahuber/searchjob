@@ -20,7 +20,7 @@ public class EscolhaCv {
     /** cv escolhido e se a escolha foi clara (false = nenhuma palavra-chave bateu ou houve empate entre stacks). */
     public record Escolha(Cv cv, boolean definida) {}
 
-    private static final String[] LIDERANCA = {"arquiteto", "arquiteta", "lider", "tech lead", "staff", "principal", "coordenador", "coordenadora"};
+    private static final String[] LIDERANCA = {"arquiteto", "arquiteta", "lider", "lideranca", "tech lead", "staff", "principal", "coordenador", "coordenadora"};
 
     public Optional<Cv> escolher(Vaga v) {
         return escolherDefinido(v).map(Escolha::cv);
@@ -31,7 +31,7 @@ public class EscolhaCv {
         if (todos.isEmpty()) return Optional.empty();
         String titulo = Texto.normalizar(v.cargo());
         String texto = Texto.normalizar(v.cargo() + " " + v.descricao());
-        boolean lideranca = Arrays.stream(LIDERANCA).anyMatch(titulo::contains);
+        boolean lideranca = Arrays.stream(LIDERANCA).anyMatch(l -> Texto.contemPalavra(titulo, l));
         Cv padrao = todos.stream().filter(c -> c.nome().toLowerCase().contains("nodejs")).findFirst().orElse(todos.get(0));
 
         // arquiteto/líder/staff: vai para o CV de sistemas distribuídos, que é o de perfil sênior/liderança
@@ -55,9 +55,19 @@ public class EscolhaCv {
         return Optional.of(new Escolha(topo.contains(padrao) ? padrao : topo.get(0), false));
     }
 
+    /**
+     * Palavra inteira ("java" não casa com "javascript"), aceitando sufixos de stack (nodejs, springboot).
+     * Termos longos (>= 9 letras) são radicais e casam por prefixo (microsservi → microsserviços).
+     */
+    static boolean casa(String texto, String termo) {
+        String fim = termo.length() >= 9 ? "" : "(?:js|boot)?(?![a-z0-9])";
+        return java.util.regex.Pattern.compile("(?<![a-z0-9])" + java.util.regex.Pattern.quote(termo) + fim)
+                .matcher(texto).find();
+    }
+
     static int pontuar(String textoNormalizado, String regras) {
         if (regras == null || regras.isBlank()) return 0;
         return (int) Arrays.stream(regras.split(",")).map(Texto::normalizar)
-                .filter(r -> !r.isEmpty() && textoNormalizado.contains(r)).count();
+                .filter(r -> !r.isEmpty() && casa(textoNormalizado, r)).count();
     }
 }

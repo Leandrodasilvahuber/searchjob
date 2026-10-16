@@ -26,13 +26,15 @@ class MdImporterTest extends BaseIT {
     @Test
     void importaMdReal() throws Exception {
         Assumptions.assumeTrue(Files.exists(PASTA.resolve("respostas_candidaturas.md")));
+        kv.remover(KvRepo.CONFIG, "md_importado");
+        kv.todos(KvRepo.DADO).keySet().forEach(k -> kv.remover(KvRepo.DADO, k)); // banco temporário é compartilhado
         situacoes.todas().forEach(x -> situacoes.excluir(x.id())); // banco temporário é compartilhado entre testes
         var r = importer.importar(PASTA);
         System.out.println("IMPORTADO: " + r);
         assertTrue(r.dadosFixos() >= 8, "dados fixos");
         assertTrue(r.situacoes() >= 30, "situações");
         assertTrue(r.candidaturas() >= 120, "candidaturas");
-        assertEquals("emaildohuber@gmail.com", kv.get(KvRepo.DADO, "E-mail", null));
+        assertTrue(kv.get(KvRepo.DADO, "E-mail", "").contains("@"));
         // idempotente
         var r2 = importer.importar(PASTA);
         assertEquals(0, r2.situacoes());

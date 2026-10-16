@@ -1,5 +1,6 @@
 server:
   port: 8787
+  address: 127.0.0.1
 spring:
   datasource:
     url: jdbc:sqlite:data/searchjob.db

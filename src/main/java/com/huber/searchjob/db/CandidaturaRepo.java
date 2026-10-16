@@ -31,19 +31,37 @@ public class CandidaturaRepo {
                 .param(url).query(Integer.class).single() > 0;
     }
 
-    /** URLs de vagas já enviadas ou puladas (para montar o conjunto de deduplicação). */
-    public List<String> urlsProcessadas() {
-        return jdbc.sql("SELECT url FROM candidatura WHERE status IN ('enviada','pulada') AND url IS NOT NULL")
+    /**
+     * URLs de vagas já tratadas (enviada/pulada). Em dry-run entram também as vagas já ensaiadas, para não
+     * repetir o preenchimento (e as chamadas à z.ai) a cada ensaio.
+     */
+    public List<String> urlsProcessadas(boolean incluirDryRun) {
+        return jdbc.sql("SELECT url FROM candidatura WHERE url IS NOT NULL AND status IN ('enviada','pulada'"
+                        + (incluirDryRun ? ",'dry_run'" : "") + ")")
                 .query(String.class).list();
+    }
+
+    /**
+     * Grava o resultado de uma vaga sem duplicar linhas: se já existe uma linha em aberto
+     * (pendente, erro, dry_run, aguardando_usuario) para a mesma URL, atualiza; senão insere.
+     */
+    public long gravar(String portal, String empresa, String cargo, String url, String cv, String status, String motivo) {
+        var aberta = jdbc.sql("SELECT id FROM candidatura WHERE url = ? AND status IN ('pendente','erro','dry_run','aguardando_usuario') "
+                + "ORDER BY id DESC LIMIT 1").param(url).query(Long.class).optional();
+        if (aberta.isPresent()) {
+            jdbc.sql("UPDATE candidatura SET status = ?, motivo = ?, cv_usado = COALESCE(?, cv_usado), data = date('now') WHERE id = ?")
+                    .param(status).param(motivo).param(cv).param(aberta.get()).update();
+            return aberta.get();
+        }
+        return inserir(portal, empresa, cargo, url, cv, status, motivo, null);
     }
 
     public long inserir(String portal, String empresa, String cargo, String url, String cv,
                         String status, String motivo, String data) {
-        jdbc.sql("INSERT INTO candidatura(portal, empresa, cargo, url, cv_usado, status, motivo, data) "
-                        + "VALUES (?,?,?,?,?,?,?, COALESCE(?, date('now')))")
+        return jdbc.sql("INSERT INTO candidatura(portal, empresa, cargo, url, cv_usado, status, motivo, data) "
+                        + "VALUES (?,?,?,?,?,?,?, COALESCE(?, date('now'))) RETURNING id")
                 .param(portal).param(empresa).param(cargo).param(url).param(cv)
-                .param(status).param(motivo).param(data).update();
-        return jdbc.sql("SELECT last_insert_rowid()").query(Long.class).single();
+                .param(status).param(motivo).param(data).query(Long.class).single();
     }
 
     public void atualizarStatus(long id, String status, String motivo) {

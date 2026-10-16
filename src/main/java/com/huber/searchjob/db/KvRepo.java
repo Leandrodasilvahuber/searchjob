@@ -17,6 +17,21 @@ public class KvRepo {
         this.jdbc = jdbc;
     }
 
+    /** Lança 404 se a tabela não é uma das três de chave/valor. */
+    public static void valida(String tabela) {
+        if (!TABELAS.contains(tabela))
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND);
+    }
+
+    /** Valor numérico da configuração; usa o padrão se estiver vazio ou inválido (evita derrubar a sessão). */
+    public int inteiro(String tabela, String chave, int padrao) {
+        try {
+            return Integer.parseInt(get(tabela, chave, String.valueOf(padrao)).trim());
+        } catch (NumberFormatException e) {
+            return padrao;
+        }
+    }
+
     private static String t(String tabela) {
         if (!TABELAS.contains(tabela)) throw new IllegalArgumentException(tabela);
         return tabela;

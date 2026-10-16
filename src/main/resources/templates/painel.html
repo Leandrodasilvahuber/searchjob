@@ -29,6 +29,7 @@
       <label><input type="checkbox" th:checked="${dryRun}" onchange="document.getElementById('dr').value=this.checked; this.form.submit()"> Dry-run (preenche mas não envia)</label>
       <input type="hidden" name="ligado" id="dr" th:value="${dryRun}">
     </form>
+    <p class="mut" style="margin:6px 0 0">Atenção: no Gupy, mesmo em dry-run o "Salvar e continuar" grava as respostas no seu perfil da Gupy; só o envio final é evitado.</p>
   </div>
   <div class="card"><b>Log</b>
     <pre id="log" th:text="${#strings.listJoin(estado.log, '&#10;')}"></pre>

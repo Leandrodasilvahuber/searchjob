@@ -9,7 +9,7 @@
     <input type="text" name="portal" th:value="${portal}" placeholder="portal (ex.: Gupy)" style="width:180px">
     <select name="status">
       <option value="">todos os status</option>
-      <option th:each="o : ${ {'enviada','pulada','erro','pendente','aguardando_usuario'} }" th:value="${o}" th:text="${o}" th:selected="${o==status}"></option>
+      <option th:each="o : ${ {'enviada','pulada','erro','pendente','dry_run','aguardando_usuario'} }" th:value="${o}" th:text="${o}" th:selected="${o==status}"></option>
     </select>
     <button>Filtrar</button>
     <span class="mut" th:text="${itens.size()} + ' vaga(s)'"></span>

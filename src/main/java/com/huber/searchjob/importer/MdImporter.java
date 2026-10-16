@@ -38,6 +38,8 @@ public class MdImporter {
 
     public Resultado importar(Path pasta) throws IOException {
         semearPadroes();
+        // já importado antes: não ressuscitar o que o usuário apagou pela tela
+        if (kv.get(KvRepo.CONFIG, "md_importado", null) != null) return new Resultado(0, 0, 0, 0);
         int d = 0, s = 0, c = 0;
         Path md = pasta.resolve("respostas_candidaturas.md");
         if (Files.exists(md)) {
@@ -83,6 +85,7 @@ public class MdImporter {
             }
         }
         int v = importarCvs(pasta);
+        if (Files.exists(md)) kv.put(KvRepo.CONFIG, "md_importado", "true");
         Resultado r = new Resultado(d, s, c, v);
         log.info("Importação concluída: {}", r);
         return r;
@@ -94,8 +97,8 @@ public class MdImporter {
         padrao(KvRepo.PREF, "recencia_dias", "14");
         padrao(KvRepo.PREF, "termos", "full stack,Vue.js,Laravel,PHP,React,Node.js,backend");
         padrao(KvRepo.PREF, "stack_proibida", "java-only,.net,golang,python,kotlin,angular,nestjs obrigatorio,react native");
-        padrao(KvRepo.PREF, "excluir_titulos", "estagio,estagiario,jovem aprendiz,banco de talentos");
-        padrao(KvRepo.PREF, "exige_ingles_oral", "calls em ingles,reunioes em ingles,fluencia oral,ingles fluente,ingles avancado,english fluent,fluent english");
+        padrao(KvRepo.PREF, "excluir_titulos", "estagio,estagiario,estagiaria,jovem aprendiz,banco de talentos");
+        padrao(KvRepo.PREF, "exige_ingles_oral", "calls em ingles,reunioes em ingles,entrevista em ingles,fluencia oral,conversacao em ingles,ingles conversacional,spoken english,english speaking");
         padrao(KvRepo.CONFIG, "modo", "codigo");
         padrao(KvRepo.CONFIG, "portais", "gupy,programathor,catho,indeed");
         padrao(KvRepo.CONFIG, "dry_run", "true");

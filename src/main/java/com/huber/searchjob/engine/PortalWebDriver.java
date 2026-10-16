@@ -73,7 +73,7 @@ public abstract class PortalWebDriver implements PortalDriver {
             if (corpo.contains("captcha") || corpo.contains("security check") || corpo.contains("just a moment")
                     || corpo.contains("verifique que voce e humano") || corpo.contains("verificacao de seguranca"))
                 return new Desfecho(Status.PRECISA_USUARIO, "CAPTCHA/verificação em " + nome());
-            if (!d.findElements(By.cssSelector("input[type=password]")).isEmpty())
+            if (d.findElements(By.cssSelector("input[type=password]")).stream().anyMatch(WebElement::isDisplayed))
                 return new Desfecho(Status.PRECISA_USUARIO, "login necessário em " + nome());
             Optional<Desfecho> especial = casoEspecial(d, corpo);
             if (especial.isPresent()) return especial.get();

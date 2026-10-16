@@ -50,14 +50,8 @@ public class SituacaoService {
         Optional<Situacao> exata = repo.ativaPorHash(hash);
         if (exata.isPresent()) return exata;
         return repo.ativas().stream()
-                .map(s -> Map2.of(s, Texto.similaridade(pergunta, s.padraoPergunta())))
-                .filter(p -> p.score >= LIMIAR_SIMILARIDADE)
-                .max(Comparator.comparingDouble(p -> p.score))
-                .map(p -> p.s);
-    }
-
-    private record Map2(Situacao s, double score) {
-        static Map2 of(Situacao s, double d) { return new Map2(s, d); }
+                .filter(s -> Texto.equivalentes(pergunta, s.padraoPergunta()))
+                .max(Comparator.comparingDouble(s -> Texto.similaridade(pergunta, s.padraoPergunta())));
     }
 
     public static boolean sensivel(String pergunta) {
@@ -111,6 +105,14 @@ public class SituacaoService {
 
         String hash = Texto.hash(pergunta);
         long id;
+        // já existe pendência aberta para esta pergunta (outra tentativa ou rodada): reusa em vez de duplicar
+        Optional<Situacao> aberta = repo.pendentePorHash(hash);
+        if (aberta.isPresent()) {
+            aviso.chamarUsuario();
+            return aguardar(aberta.get().id(),
+                    SituacaoRepo.PENDENTE_CONFIRMACAO.equals(aberta.get().status()) ? Tipo.CONFIRMADA_PELO_USUARIO : Tipo.RESPONDIDA_PELO_USUARIO,
+                    continuar);
+        }
         if (zai.configurado()) {
             JsonNode r;
             try {
@@ -167,7 +169,7 @@ public class SituacaoService {
             String pedido = "PERGUNTA/CAMPO:\n" + pergunta + "\n\nINSTRUÇÕES DO CANDIDATO PARA ESTE TIPO DE CAMPO:\n" + instrucao
                     + (aprovada.isBlank() ? "" : "\n\nRESPOSTA APROVADA ANTERIORMENTE (base de fatos e de tom):\n" + aprovada)
                     + "\n\nVAGA:\n" + nvl(contextoVaga, "")
-                    + "\n\nDADOS FIXOS:\n" + kv.todos(KvRepo.DADO)
+                    + "\n\nDADOS FIXOS:\n" + cvContexto.dadosParaPrompt()
                     + "\n\nCURRÍCULO ESCOLHIDO PARA ESTA VAGA:\n"
                     + (cv != null && cv.textoExtraido() != null ? cv.textoExtraido() : cvContexto.textoCvs());
             String texto = zai.conversar(SYSTEM_TEXTO, pedido).trim();
@@ -222,7 +224,7 @@ public class SituacaoService {
     private String montarPedido(String pergunta, String contextoVaga) {
         StringBuilder sb = new StringBuilder();
         sb.append("PERGUNTA DO FORMULÁRIO:\n").append(pergunta).append("\n\nVAGA:\n").append(contextoVaga == null ? "" : contextoVaga);
-        sb.append("\n\nDADOS FIXOS:\n").append(kv.todos(KvRepo.DADO));
+        sb.append("\n\nDADOS FIXOS:\n").append(cvContexto.dadosParaPrompt());
         sb.append("\n\nPREFERÊNCIAS:\n").append(kv.todos(KvRepo.PREF));
         sb.append("\n\nRESPOSTAS JÁ SALVAS (amostra):\n").append(cvContexto.respostasSalvas(40));
         sb.append("\n\nCURRÍCULO:\n").append(cvContexto.textoCvs());

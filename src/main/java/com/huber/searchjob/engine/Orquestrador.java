@@ -58,6 +58,10 @@ public class Orquestrador {
 
     public synchronized void iniciar() {
         if (rodando) return;
+        if (thread != null && thread.isAlive()) {
+            registrar("a sessão anterior ainda está encerrando — aguarde alguns segundos");
+            return;
+        }
         rodando = true;
         processadas = enviadas = puladas = erros = 0;
         log.clear();
@@ -90,14 +94,14 @@ public class Orquestrador {
                     case "programathor" -> drivers.add(new ProgramaThorDriver(navegador, situacoes));
                     case "catho" -> drivers.add(new CathoDriver(navegador, situacoes));
                     case "indeed" -> drivers.add(new IndeedDriver(navegador, situacoes,
-                            Integer.parseInt(kv.get(KvRepo.PREF, "recencia_dias", "14"))));
+                            kv.inteiro(KvRepo.PREF, "recencia_dias", 14)));
                     case "" -> { }
                     default -> registrar("portal \"" + p.trim() + "\" ainda não é suportado — ignorado");
                 }
             }
             boolean zaiAvalia = "zai".equals(kv.get(KvRepo.CONFIG, "modo", "codigo"));
             boolean dryRun = Boolean.parseBoolean(kv.get(KvRepo.CONFIG, "dry_run", "true"));
-            int max = Integer.parseInt(kv.get(KvRepo.CONFIG, "max_vagas", "30"));
+            int max = kv.inteiro(KvRepo.CONFIG, "max_vagas", 30);
             if (zaiAvalia && !zai.configurado()) {
                 registrar("modo z.ai sem chave configurada — voltando ao modo código");
                 zaiAvalia = false;
@@ -106,7 +110,7 @@ public class Orquestrador {
             Set<String> vistas = new HashSet<>();
             Set<String> feitas = new HashSet<>();
             bloqueados.clear();
-            candidaturas.urlsProcessadas().forEach(u -> feitas.add(ChaveVaga.de(u)));
+            candidaturas.urlsProcessadas(dryRun).forEach(u -> feitas.add(ChaveVaga.de(u)));
             for (PortalDriver driver : drivers) {
                 for (String termo : kv.get(KvRepo.PREF, "termos", "").split(",")) {
                     if (!rodando || termo.isBlank() || bloqueados.contains(driver.nome())) continue;
@@ -147,7 +151,7 @@ public class Orquestrador {
         String rotulo = v.empresa() + " — " + v.cargo();
         Optional<String> descarte = filtro.motivoDescarte(v, LocalDate.now());
         if (descarte.isPresent()) {
-            candidaturas.inserir(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", descarte.get(), null);
+            candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", descarte.get());
             puladas++;
             aviso.pulada();
             registrar("pulada: " + rotulo + " (" + descarte.get() + ")");
@@ -174,7 +178,7 @@ public class Orquestrador {
                 JsonNode r = zai.conversarJson(AVALIA_SYSTEM, avaliaPedido(v));
                 if (!r.path("candidatar").asBoolean(false)) {
                     String motivo = "z.ai: " + r.path("motivo").asText("fora do perfil");
-                    candidaturas.inserir(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", motivo, null);
+                    candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", motivo);
                     puladas++;
                     aviso.pulada();
                     registrar("pulada: " + rotulo + " (" + motivo + ")");
@@ -194,18 +198,16 @@ public class Orquestrador {
             rodando = false;
             return;
         }
-        long id = candidaturas.inserir(v.portal(), v.empresa(), v.cargo(), v.url(), cv.get().nome(), "pendente", "em andamento", null);
+        long id = candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), cv.get().nome(), "pendente", "em andamento");
         registrar("candidatando: " + rotulo + " · CV " + cv.get().nome());
-        PortalDriver.Desfecho d = null;
-        for (int tentativa = 1; tentativa <= 2 && rodando; tentativa++) {
-            try {
-                d = driver.candidatar(v, cv.get(), dryRun, () -> rodando);
-            } catch (Exception e) {
-                d = new PortalDriver.Desfecho(PortalDriver.Status.ERRO, e.getMessage());
-            }
-            if (d.status() != PortalDriver.Status.ERRO) break;
+        // uma tentativa por rodada: repetir depois de um clique em "enviar" poderia candidatar duas vezes
+        PortalDriver.Desfecho d;
+        try {
+            d = driver.candidatar(v, cv.get(), dryRun, () -> rodando);
+        } catch (Exception e) {
+            d = new PortalDriver.Desfecho(PortalDriver.Status.ERRO, String.valueOf(e.getMessage()));
         }
-        if (d == null) {
+        if (!rodando && d.status() == PortalDriver.Status.ERRO) {
             candidaturas.atualizarStatus(id, "pendente", "sessão parada");
             return;
         }
@@ -217,7 +219,7 @@ public class Orquestrador {
                 registrar("enviada: " + rotulo);
             }
             case PRONTA_DRY_RUN -> {
-                candidaturas.atualizarStatus(id, "pendente", d.motivo());
+                candidaturas.atualizarStatus(id, "dry_run", d.motivo());
                 registrar("pronta (dry-run): " + rotulo);
             }
             case PRECISA_USUARIO -> {

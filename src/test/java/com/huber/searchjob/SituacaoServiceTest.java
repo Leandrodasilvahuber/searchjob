@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huber.searchjob.db.KvRepo;
 import com.huber.searchjob.db.SituacaoRepo;
 import com.huber.searchjob.engine.Aviso;
 import com.huber.searchjob.engine.SituacaoService;
@@ -22,6 +23,8 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 class SituacaoServiceTest extends BaseIT {
     @Autowired SituacaoService service;
     @Autowired SituacaoRepo repo;
+    @Autowired com.huber.searchjob.db.KvRepo kv;
+    @Autowired com.huber.searchjob.engine.CvContexto cvContexto;
     @Autowired com.huber.searchjob.db.TextoGeradoRepo textos;
     @MockBean ZaiClient zai;
     @MockBean Aviso aviso;
@@ -98,5 +101,33 @@ class SituacaoServiceTest extends BaseIT {
         assertTrue(SituacaoService.discursiva("Conte sobre sua experiência", false));
         assertTrue(SituacaoService.discursiva("Qualquer coisa", true));
         assertFalse(SituacaoService.discursiva("Pretensão salarial", false));
+    }
+
+    @Test
+    void perguntaSemRespostaNaoDuplicaPendencia() throws Exception {
+        when(zai.configurado()).thenReturn(false);
+        String pergunta = "Qual a cor favorita do gerente de contratação?";
+        var f1 = CompletableFuture.supplyAsync(() -> service.resolver("Gupy", pergunta, "", () -> true));
+        esperarStatus(SituacaoRepo.AGUARDANDO_USUARIO);
+        var f2 = CompletableFuture.supplyAsync(() -> service.resolver("Gupy", pergunta, "", () -> true));
+        Thread.sleep(500);
+        long abertas = repo.porStatus(SituacaoRepo.AGUARDANDO_USUARIO).stream()
+                .filter(x -> x.padraoPergunta().equals(pergunta)).count();
+        assertEquals(1, abertas);
+        service.responder(repo.porStatus(SituacaoRepo.AGUARDANDO_USUARIO).stream()
+                .filter(x -> x.padraoPergunta().equals(pergunta)).findFirst().orElseThrow().id(), "Azul");
+        assertEquals("Azul", f1.get().resposta());
+        assertEquals("Azul", f2.get().resposta());
+    }
+
+    @Test
+    void dadosSensiveisNaoVaoParaOPrompt() {
+        kv.put(KvRepo.DADO, "CPF", "807.998.920-68");
+        kv.put(KvRepo.DADO, "Nome da mãe", "Fulana");
+        kv.put(KvRepo.DADO, "Cidade/UF", "Florianópolis, SC");
+        var dados = cvContexto.dadosParaPrompt();
+        assertFalse(dados.containsKey("CPF"));
+        assertFalse(dados.containsKey("Nome da mãe"));
+        assertTrue(dados.containsKey("Cidade/UF"));
     }
 }

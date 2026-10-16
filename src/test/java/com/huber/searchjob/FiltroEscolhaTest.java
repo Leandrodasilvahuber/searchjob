@@ -55,6 +55,21 @@ class FiltroEscolhaTest extends BaseIT {
     }
 
     @Test
+    void javaNaoCasaComJavascript() {
+        LocalDate hoje = LocalDate.now();
+        var e = escolha.escolherDefinido(vaga("Dev", "experiência sólida em javascript", hoje)).orElseThrow();
+        assertFalse(e.definida()); // nenhuma stack clara: nada de mandar o CV de Java por engano
+        assertEquals("Leandro_Huber_CV_NodeJS", e.cv().nome());
+    }
+
+    @Test
+    void kubernetesNaoViraStackProibida() {
+        LocalDate hoje = LocalDate.of(2026, 10, 16);
+        assertTrue(filtro.motivoDescarte(vaga("Engenheiro Kubernetes", "node", hoje), hoje).isEmpty());
+        assertTrue(filtro.motivoDescarte(vaga("Dev .NET Sênior", "", hoje), hoje).isPresent());
+    }
+
+    @Test
     void sinalizaQuandoNaoHaDefinicaoEPriorizaLideranca() {
         LocalDate hoje = LocalDate.now();
         var indefinida = escolha.escolherDefinido(vaga("Dev", "nada conhecido", hoje)).orElseThrow();
