@@ -198,7 +198,7 @@ public class SituacaoService {
                 + "\n\nINSTRUÇÕES DO CANDIDATO PARA ESTE TIPO DE CAMPO:\n" + INSTRUCAO_PADRAO
                 + "\n\nVAGA:\n" + nvl(s.contexto(), "")
                 + "\n\nDADOS FIXOS:\n" + cvContexto.dadosParaPrompt()
-                + "\n\nRESPOSTAS JÁ SALVAS (amostra):\n" + cvContexto.respostasSalvas(40)
+                + "\n\nRESPOSTAS JÁ SALVAS (as mais parecidas com a pergunta):\n" + cvContexto.respostasSalvas(s.padraoPergunta(), 40)
                 + "\n\nCURRÍCULOS:\n" + cvContexto.textoCvs();
         return ia.conversar(SYSTEM_TEXTO, pedido).trim();
     }
@@ -248,7 +248,7 @@ public class SituacaoService {
         sb.append("PERGUNTA DO FORMULÁRIO:\n").append(pergunta).append("\n\nVAGA:\n").append(contextoVaga == null ? "" : contextoVaga);
         sb.append("\n\nDADOS FIXOS:\n").append(cvContexto.dadosParaPrompt());
         sb.append("\n\nPREFERÊNCIAS:\n").append(kv.todos(KvRepo.PREF));
-        sb.append("\n\nRESPOSTAS JÁ SALVAS (amostra):\n").append(cvContexto.respostasSalvas(40));
+        sb.append("\n\nRESPOSTAS JÁ SALVAS (as mais parecidas com a pergunta):\n").append(cvContexto.respostasSalvas(pergunta, 40));
         sb.append("\n\nCURRÍCULO:\n").append(cvContexto.textoCvs());
         return sb.toString();
     }

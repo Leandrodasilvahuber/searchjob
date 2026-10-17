@@ -46,9 +46,11 @@ public class CvContexto {
                 || n.contains("nome da mae") || n.contains("banc");
     }
 
-    public String respostasSalvas(int max) {
+    /** As {@code max} respostas salvas mais parecidas com a pergunta (a base inteira não cabe no pedido à IA). */
+    public String respostasSalvas(String pergunta, int max) {
         return situacoes.ativas().stream()
                 .filter(s -> !sensivel(s.padraoPergunta()) && !CPF.matcher(String.valueOf(s.promptOuResposta())).find())
+                .sorted(java.util.Comparator.comparingDouble((Situacao s) -> -Texto.similaridade(pergunta, s.padraoPergunta())))
                 .limit(max)
                 .map((Situacao s) -> "- " + s.padraoPergunta() + " => " + s.promptOuResposta())
                 .collect(Collectors.joining("\n"));
