@@ -12,7 +12,7 @@
       <span class="tag" th:text="${t.portal}"></span>
       <span class="mut" th:text="${t.vaga} + ' · CV ' + ${t.cv} + ' · ' + ${t.criadoEm}"></span>
     </div>
-    <p><b th:text="${#strings.abbreviate(t.pergunta, 160)}"></b></p>
+    <p><b th:text="${t.pergunta}"></b></p>
     <pre th:text="${t.texto}"></pre>
     <form th:action="@{/textos/{id}/excluir(id=${t.id})}" method="post"><button class="del">Excluir</button></form>
   </div>

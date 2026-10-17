@@ -47,7 +47,6 @@
       <label><input type="checkbox" th:checked="${relatorio}" onchange="document.getElementById('rl').value=this.checked; this.form.submit()"> Gerar relatório na Área de Trabalho (estatísticas e textos da IA)</label>
       <input type="hidden" name="ligado" id="rl" th:value="${relatorio}">
     </form>
-    <p class="mut" style="margin:6px 0 0">Atenção: no Gupy, mesmo em dry-run o "Salvar e continuar" grava as respostas no seu perfil da Gupy; só o envio final é evitado.</p>
   </div>
   <div class="card"><div class="row"><b>Log</b> <button type="button" id="limpar-log" class="sec">Limpar log</button></div>
     <ul id="log" class="log"></ul>
@@ -63,7 +62,8 @@
   </div>
 </main>
 <style>
-  .log { list-style:none; margin:8px 0 0; padding:0; max-height:360px; overflow:auto; font-size:14px; }
+  .log { list-style:none; margin:8px 0 0; padding:0; height:360px; overflow-y:scroll; scrollbar-width:auto; scrollbar-color:var(--mut) var(--bd); font-size:14px; }
+  .log::-webkit-scrollbar { width:12px; } .log::-webkit-scrollbar-track { background:var(--bd); } .log::-webkit-scrollbar-thumb { background:var(--mut); border-radius:6px; }
   .log li { padding:3px 0; border-bottom:1px solid var(--bd); display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
   .log .h { color:var(--mut); font-size:12px; }
   .log .t-enviada { color:var(--ok); } .log .t-erro { color:var(--bad); } .log .t-aguardando { color:var(--warn); font-weight:600; }

@@ -189,6 +189,20 @@ public class SituacaoService {
         }
     }
 
+    /** Rascunho da IA para uma pendência (botão da tela de pendências): texto livre ou uma das opções, sem gravar nada. */
+    public String sugerirResposta(long id) {
+        Situacao s = repo.porId(id).orElseThrow(() -> new IllegalArgumentException("pendência não encontrada"));
+        boolean escolha = s.padraoPergunta().contains("[opções:");
+        String pedido = "PERGUNTA/CAMPO:\n" + s.padraoPergunta()
+                + (escolha ? "\n\nResponda SOMENTE com o texto exato de UMA das opções, sem mais nada." : "")
+                + "\n\nINSTRUÇÕES DO CANDIDATO PARA ESTE TIPO DE CAMPO:\n" + INSTRUCAO_PADRAO
+                + "\n\nVAGA:\n" + nvl(s.contexto(), "")
+                + "\n\nDADOS FIXOS:\n" + cvContexto.dadosParaPrompt()
+                + "\n\nRESPOSTAS JÁ SALVAS (amostra):\n" + cvContexto.respostasSalvas(40)
+                + "\n\nCURRÍCULOS:\n" + cvContexto.textoCvs();
+        return ia.conversar(SYSTEM_TEXTO, pedido).trim();
+    }
+
     private static String nvl(String s, String padrao) {
         return s == null || s.isBlank() ? padrao : s;
     }

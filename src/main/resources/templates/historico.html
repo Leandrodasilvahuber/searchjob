@@ -24,7 +24,7 @@
         <td th:text="${c.portal}"></td>
         <td th:text="${c.cvUsado}"></td>
         <td><span class="tag" th:classappend="${c.status}" th:text="${c.status}"></span></td>
-        <td th:text="${#strings.abbreviate(c.motivo, 90)}"></td>
+        <td th:text="${c.motivo}"></td>
         <td><form th:action="@{/historico/{id}/excluir(id=${c.id})}" method="post"><button class="del" onclick="return confirm('Excluir?')">×</button></form></td>
       </tr>
     </table>

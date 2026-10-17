@@ -59,7 +59,7 @@ final class Radios {
 
     private Radios() {}
 
-    /** Responde os grupos de rádio sem marcação. Devolve null se tudo foi respondido (ou não há rádios). */
+    /** Responde os grupos de rádio sem marcação. Depois dos rádios, responde os selects. Devolve null se tudo foi respondido. */
     static Desfecho preencher(WebDriver d, SituacaoService situacoes, String portal, String contexto, Cv cv,
                               BooleanSupplier continuar) {
         List<Grupo> grupos = ler(d);
@@ -86,7 +86,7 @@ final class Radios {
                 }
             }
         }
-        return null;
+        return Selects.preencher(d, situacoes, portal, contexto, cv, continuar);
     }
 
     /** Índice da opção que corresponde à resposta (igual, depois contida, depois sim/não), ou -1. */
@@ -137,7 +137,7 @@ final class Radios {
                 n.path("opcoes").forEach(x -> ops.add(x.asText()));
                 out.add(new Grupo(n.path("name").asText(), n.path("pergunta").asText(), ops));
             }
-        } catch (Exception e) {
+        } catch (com.fasterxml.jackson.core.JsonProcessingException | org.openqa.selenium.WebDriverException e) {
             // página sem rádios legíveis: segue o fluxo normal
         }
         return out;

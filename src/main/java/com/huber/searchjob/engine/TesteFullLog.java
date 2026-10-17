@@ -36,7 +36,7 @@ final class TesteFullLog {
         try {
             Files.createDirectories(PASTA);
             Files.writeString(arq, s, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (Exception ignored) {
+        } catch (java.io.IOException e) {
             // log de teste: nunca derruba a sessão
         }
     }

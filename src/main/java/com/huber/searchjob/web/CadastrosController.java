@@ -117,6 +117,16 @@ public class CadastrosController {
         return "redirect:/pendencias";
     }
 
+    @PostMapping(value = "/pendencias/{id}/gerar", produces = "text/plain;charset=UTF-8")
+    @org.springframework.web.bind.annotation.ResponseBody
+    public org.springframework.http.ResponseEntity<String> gerar(@PathVariable long id) {
+        try {
+            return org.springframework.http.ResponseEntity.ok(situacaoService.sugerirResposta(id));
+        } catch (RuntimeException e) {
+            return org.springframework.http.ResponseEntity.status(502).body("A IA não respondeu: " + e.getMessage());
+        }
+    }
+
     @PostMapping("/pendencias/{id}/responder")
     public String responder(@PathVariable long id, @RequestParam String resposta) {
         if (!resposta.isBlank()) situacaoService.responder(id, resposta);

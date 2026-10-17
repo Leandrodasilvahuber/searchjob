@@ -32,7 +32,7 @@
         <button>Salvar</button>
         <button class="del" th:formaction="@{/situacoes/{id}/excluir(id=${s.id})}" onclick="return confirm('Excluir?')">Excluir</button>
       </div>
-      <p class="mut" th:if="${s.contexto != null and !s.contexto.isBlank()}" th:text="'Contexto: ' + ${#strings.abbreviate(s.contexto, 200)}"></p>
+      <p class="mut" th:if="${s.contexto != null and !s.contexto.isBlank()}" th:text="'Contexto: ' + ${s.contexto}"></p>
     </form>
   </div>
 </main>

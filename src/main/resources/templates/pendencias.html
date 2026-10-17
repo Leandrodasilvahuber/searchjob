@@ -8,9 +8,9 @@
   <h2>A IA respondeu — confirme ou corrija</h2>
   <p class="mut" th:if="${confirmar.isEmpty()}">Nada para confirmar.</p>
   <div class="card chamando" th:each="s : ${confirmar}">
-    <b th:text="${s.padraoPergunta}"></b>
-    <p class="mut" th:if="${s.contexto != null}" th:text="${#strings.abbreviate(s.contexto, 160)}"></p>
-    <form th:action="@{/pendencias/{id}/confirmar(id=${s.id})}" method="post">
+    <b class="perg" th:text="${s.padraoPergunta}"></b>
+    <details th:if="${s.contexto != null}"><summary class="mut">Vaga</summary><p class="mut" style="white-space:pre-wrap" th:text="${s.contexto}"></p></details>
+    <form th:action="@{/pendencias/{id}/confirmar(id=${s.id})}" method="post" th:attr="data-gerar=@{/pendencias/{id}/gerar(id=${s.id})}">
       <textarea name="resposta" th:text="${s.promptOuResposta}"></textarea>
       <button>Confirmar e salvar como regra</button>
       <button class="del" th:formaction="@{/situacoes/{id}/excluir(id=${s.id})}">Descartar</button>
@@ -19,14 +19,46 @@
   <h2>A IA não resolveu — me diga o que responder</h2>
   <p class="mut" th:if="${ajuda.isEmpty()}">Nada aguardando.</p>
   <div class="card chamando" th:each="s : ${ajuda}">
-    <b th:text="${s.padraoPergunta}"></b>
-    <p class="mut" th:if="${s.contexto != null}" th:text="${#strings.abbreviate(s.contexto, 160)}"></p>
-    <form th:action="@{/pendencias/{id}/responder(id=${s.id})}" method="post">
+    <b class="perg" th:text="${s.padraoPergunta}"></b>
+    <details th:if="${s.contexto != null}"><summary class="mut">Vaga</summary><p class="mut" style="white-space:pre-wrap" th:text="${s.contexto}"></p></details>
+    <form th:action="@{/pendencias/{id}/responder(id=${s.id})}" method="post" th:attr="data-gerar=@{/pendencias/{id}/gerar(id=${s.id})}">
       <textarea name="resposta" placeholder="O que responder nessa situação? Vira regra para as próximas vezes."></textarea>
       <button>Salvar resposta</button>
       <button class="del" th:formaction="@{/situacoes/{id}/excluir(id=${s.id})}">Descartar</button>
     </form>
   </div>
 </main>
+<script>
+  // "Gerar com a IA": preenche a caixa com um rascunho (texto livre ou uma das opções) para você revisar antes de salvar
+  document.querySelectorAll('form[data-gerar]').forEach(f => {
+    const g = document.createElement('button'); g.type = 'button'; g.className = 'sec'; g.textContent = '✨ Gerar com a IA';
+    const ta = f.querySelector('textarea');
+    g.onclick = async () => {
+      g.disabled = true; const t = g.textContent; g.textContent = 'gerando…';
+      try {
+        const r = await fetch(f.dataset.gerar, { method: 'POST', signal: AbortSignal.timeout(90000) });
+        const txt = await r.text();
+        if (r.ok) ta.value = txt; else alert(txt);
+      } catch (e) { alert(e.name === 'TimeoutError' ? 'A IA demorou mais de 90s; tente de novo ou escreva a resposta.' : 'Falha ao chamar a IA: ' + e); }
+      g.disabled = false; g.textContent = t;
+    };
+    ta.after(g);
+  });
+  // pergunta de múltipla escolha vem como "pergunta [opções: a | b | c]": mostra a pergunta inteira e as opções como botões
+  document.querySelectorAll('.card.chamando').forEach(card => {
+    const b = card.querySelector('.perg'); const ta = card.querySelector('textarea');
+    const m = b && b.textContent.match(/^([\s\S]*?)\s*\[opções: ([\s\S]*)\]\s*$/);
+    if (!m) return;
+    b.textContent = m[1];
+    const box = document.createElement('div'); box.className = 'row'; box.style.margin = '6px 0';
+    m[2].split(' | ').forEach(op => {
+      const x = document.createElement('button'); x.type = 'button'; x.className = 'sec'; x.textContent = op;
+      x.onclick = () => { ta.value = op; box.querySelectorAll('button').forEach(y => y.style.outline = ''); x.style.outline = '2px solid var(--ac)'; };
+      box.appendChild(x);
+    });
+    b.after(box);
+    ta.placeholder = 'Escolha uma opção acima (a resposta precisa ser uma delas).';
+  });
+</script>
 </body>
 </html>

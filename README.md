@@ -114,7 +114,6 @@ enviados à IA. O CPF continua disponível para preencher formulários que o pe�
 
 Ligado por padrão. O robô preenche tudo e **para antes do botão de envio**, marcando a vaga como `dry_run`. Vagas
 ensaiadas não são refeitas em novos ensaios (não repete as chamadas à IA); no envio real elas são tentadas de novo.
-No Gupy, mesmo em dry-run, "Salvar e continuar" grava as respostas no seu perfil da Gupy; só o envio final é evitado.
 
 ### Quando ele chama você
 

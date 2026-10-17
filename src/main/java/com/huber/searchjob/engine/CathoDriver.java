@@ -55,7 +55,7 @@ public class CathoDriver extends PortalWebDriver {
             try {
                 var no = new com.fasterxml.jackson.databind.ObjectMapper().readTree(m.group(1));
                 if ("JobPosting".equals(no.path("@type").asText())) return no.path("description").asText("");
-            } catch (Exception ignored) {
+            } catch (com.fasterxml.jackson.core.JsonProcessingException ignored) {
                 // bloco JSON-LD de outro tipo ou malformado: tenta o próximo
             }
         }
