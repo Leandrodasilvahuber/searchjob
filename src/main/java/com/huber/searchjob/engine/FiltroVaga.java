@@ -24,15 +24,20 @@ public class FiltroVaga {
         return Optional.empty();
     }
 
+    /** Vaga escrita em inglês é sempre descartada, em qualquer modo. */
+    public Optional<String> motivoIdioma(Vaga v) {
+        return Texto.emIngles(v.cargo() + " " + v.descricao()) ? Optional.of("vaga em inglês") : Optional.empty();
+    }
+
     public Optional<String> motivoDescarte(Vaga v, LocalDate hoje) {
         Optional<String> velha = motivoRecencia(v, hoje);
         if (velha.isPresent()) return velha;
 
-        String titulo = Texto.normalizar(v.cargo());
+        String titulo = normalizar(v.cargo());
         for (String t : lista("excluir_titulos"))
             if (Texto.contemPalavra(titulo, t)) return Optional.of("tipo de vaga excluído: " + t);
 
-        String tudo = Texto.normalizar(v.cargo() + " " + v.descricao());
+        String tudo = normalizar(v.cargo() + " " + v.descricao());
         for (String t : lista("exige_ingles_oral"))
             if (Texto.contemPalavra(tudo, t)) return Optional.of("exige inglês oral: " + t);
         for (String t : lista("stack_proibida"))
@@ -58,13 +63,18 @@ public class FiltroVaga {
         return true;
     }
 
+    /** "C#" vira "csharp" e ".NET" vira "dotnet" (a normalização apagaria o "#" e o ponto, sobrando "c" e "net" soltos). */
+    private static String normalizar(String s) {
+        return Texto.normalizar(s == null ? "" : s.replaceAll("(?i)c#", "csharp").replaceAll("(?i)\\.net\\b", " dotnet"));
+    }
+
     private List<String> listaOu(String chave, String padrao) {
         return Arrays.stream(kv.get(KvRepo.PREF, chave, padrao).split(","))
-                .map(Texto::normalizar).filter(s -> !s.isEmpty()).toList();
+                .map(FiltroVaga::normalizar).filter(s -> !s.isEmpty()).toList();
     }
 
     private List<String> lista(String chave) {
         return Arrays.stream(kv.get(KvRepo.PREF, chave, "").split(","))
-                .map(Texto::normalizar).filter(s -> !s.isEmpty()).toList();
+                .map(FiltroVaga::normalizar).filter(s -> !s.isEmpty()).toList();
     }
 }

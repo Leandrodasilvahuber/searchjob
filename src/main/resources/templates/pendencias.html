@@ -47,13 +47,19 @@
   // pergunta de múltipla escolha vem como "pergunta [opções: a | b | c]": mostra a pergunta inteira e as opções como botões
   document.querySelectorAll('.card.chamando').forEach(card => {
     const b = card.querySelector('.perg'); const ta = card.querySelector('textarea');
+    const multi = b && b.textContent.startsWith('(múltipla escolha');
+    if (multi) b.textContent = b.textContent.replace(/^\(múltipla escolha[^)]*\)\s*/, '');
     const m = b && b.textContent.match(/^([\s\S]*?)\s*\[opções: ([\s\S]*)\]\s*$/);
     if (!m) return;
     b.textContent = m[1];
     const box = document.createElement('div'); box.className = 'row'; box.style.margin = '6px 0';
     m[2].split(' | ').forEach(op => {
       const x = document.createElement('button'); x.type = 'button'; x.className = 'sec'; x.textContent = op;
-      x.onclick = () => { ta.value = op; box.querySelectorAll('button').forEach(y => y.style.outline = ''); x.style.outline = '2px solid var(--ac)'; };
+      x.onclick = () => {
+        if (!multi) { ta.value = op; box.querySelectorAll('button').forEach(y => y.style.outline = ''); x.style.outline = '2px solid var(--ac)'; return; }
+        x.style.outline = x.style.outline ? '' : '2px solid var(--ac)'; // várias opções: cada clique liga/desliga uma
+        ta.value = [...box.querySelectorAll('button')].filter(y => y.style.outline).map(y => y.textContent).join(' | ');
+      };
       box.appendChild(x);
     });
     b.after(box);

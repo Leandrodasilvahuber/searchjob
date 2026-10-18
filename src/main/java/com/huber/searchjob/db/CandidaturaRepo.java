@@ -17,6 +17,9 @@ public class CandidaturaRepo {
 
     public CandidaturaRepo(JdbcClient jdbc) {
         this.jdbc = jdbc;
+        // base criada antes da coluna descricao: acrescenta sem perder as candidaturas
+        if (jdbc.sql("SELECT COUNT(*) FROM pragma_table_info('candidatura') WHERE name = 'descricao'").query(Integer.class).single() == 0)
+            jdbc.sql("ALTER TABLE candidatura ADD COLUMN descricao TEXT").update();
     }
 
     public List<Candidatura> listar(String portal, String status) {
@@ -41,11 +44,31 @@ public class CandidaturaRepo {
                 .query(String.class).list();
     }
 
+    /** Quantas vagas do portal já estão tratadas: a busca pede essa folga a mais para o limite valer só para vagas novas. */
+    public int contarProcessadas(String portal, boolean incluirDryRun) {
+        return jdbc.sql("SELECT COUNT(*) FROM candidatura WHERE portal = ? AND status IN ('enviada','pulada'"
+                        + (incluirDryRun ? ",'dry_run'" : "") + ")")
+                .param(portal).query(Integer.class).single();
+    }
+
     /**
      * Grava o resultado de uma vaga sem duplicar linhas: se já existe uma linha em aberto
      * (pendente, erro, dry_run, aguardando_usuario) para a mesma URL, atualiza; senão insere.
      */
     public long gravar(String portal, String empresa, String cargo, String url, String cv, String status, String motivo) {
+        return gravar(portal, empresa, cargo, url, cv, status, motivo, null);
+    }
+
+    /** Igual ao anterior, guardando também a descrição da vaga (a que a IA leu); null mantém a já gravada. */
+    public long gravar(String portal, String empresa, String cargo, String url, String cv, String status, String motivo,
+                       String descricao) {
+        long id = gravarSemDescricao(portal, empresa, cargo, url, cv, status, motivo);
+        if (descricao != null && !descricao.isBlank())
+            jdbc.sql("UPDATE candidatura SET descricao = ? WHERE id = ?").param(descricao).param(id).update();
+        return id;
+    }
+
+    private long gravarSemDescricao(String portal, String empresa, String cargo, String url, String cv, String status, String motivo) {
         var aberta = jdbc.sql("SELECT id FROM candidatura WHERE url = ? AND status IN ('pendente','erro','dry_run','aguardando_usuario') "
                 + "ORDER BY id DESC LIMIT 1").param(url).query(Long.class).optional();
         if (aberta.isPresent()) {

@@ -102,7 +102,7 @@ public class GupyDriver implements PortalDriver {
             for (JsonNode j : data) out.add(paraVaga(j));
             if (data.size() < 100) break;
         }
-        out.sort((a, b) -> b.publicada() == null ? -1 : a.publicada() == null ? 1 : b.publicada().compareTo(a.publicada()));
+        out.sort(Vaga.MAIS_RECENTE);
         return out.size() > max ? out.subList(0, max) : out;
     }
 
@@ -160,10 +160,49 @@ public class GupyDriver implements PortalDriver {
             int marcados = d.findElements(By.cssSelector("input[type=radio]:checked")).size();
             String t = texto(d).replaceAll("\\s+", " ");
             return "url=" + d.getCurrentUrl() + " botões=" + botoes + " radios=" + marcados + "/" + radios
+                    + " inválidos=" + camposInvalidos(d) + " captura=" + capturar(d)
                     + " texto=…" + (t.length() > 300 ? t.substring(t.length() - 300) : t);
         } catch (Exception e) {
             return "diagnóstico indisponível";
         }
+    }
+
+    /** Campos visíveis que o navegador/a página marcam como inválidos (obrigatórios vazios): é o que impede o "Salvar e continuar". */
+    private static String camposInvalidos(WebDriver d) {
+        try {
+            Object o = ((JavascriptExecutor) d).executeScript(
+                    "var r=[];document.querySelectorAll('input,select,textarea').forEach(function(e){"
+                            + "if(e.type==='hidden'||e.type==='radio'&&e.checked)return;"
+                            + "var inv=e.getAttribute('aria-invalid')==='true'||(e.required&&!e.value&&e.type!=='radio'&&e.type!=='checkbox')||(e.type==='checkbox'&&e.required&&!e.checked);"
+                            + "if(!inv||e.getClientRects().length===0&&!(e.labels&&e.labels[0]&&e.labels[0].getClientRects().length))return;"
+                            + "var l=(e.labels&&e.labels[0])?e.labels[0].innerText:(e.getAttribute('aria-label')||e.name||e.id);"
+                            + "r.push(e.tagName.toLowerCase()+'['+(e.type||'')+']:'+String(l).trim().substring(0,80));});"
+                            + "return r.join(' | ');");
+            return o == null || o.toString().isBlank() ? "nenhum" : o.toString();
+        } catch (Exception e) {
+            return "indisponível";
+        }
+    }
+
+    /** Foto da janela do robô no momento do erro, em data/erros (só a janela do Firefox dirigido, não a sua tela). Usada também pelos outros portais. */
+    static String capturar(WebDriver d) {
+        try {
+            java.nio.file.Path dir = java.nio.file.Path.of("data", "erros");
+            java.nio.file.Files.createDirectories(dir);
+            java.nio.file.Path png = dir.resolve("gupy-" + System.currentTimeMillis() + ".png");
+            java.nio.file.Files.write(png, ((org.openqa.selenium.TakesScreenshot) d).getScreenshotAs(org.openqa.selenium.OutputType.BYTES));
+            return png.toString();
+        } catch (Exception e) {
+            return "indisponível";
+        }
+    }
+
+    /** Página "/reproved": a Gupy eliminou a candidatura por uma pergunta eliminatória ou pela triagem. Não é falha do robô. */
+    private static Desfecho reprovada(String corpo) {
+        String t = corpo.replaceAll("\\s+", " ");
+        int i = t.indexOf("Pergunta eliminatória:");
+        String pergunta = i < 0 ? "" : t.substring(i + 22, Math.min(t.length(), i + 22 + 200)).trim();
+        return new Desfecho(Status.PULADA, "reprovado pelo Gupy" + (pergunta.isEmpty() ? " na triagem automática" : " · eliminatória: " + pergunta));
     }
 
     /** Um passo do formulário. Devolve o desfecho final, ou null para seguir ao próximo passo. */
@@ -174,6 +213,7 @@ public class GupyDriver implements PortalDriver {
             String url = d.getCurrentUrl();
             if (corpo.contains("Candidatura finalizada")) return new Desfecho(Status.ENVIADA, "Candidatura finalizada");
             if (jaCandidatou(corpo)) return new Desfecho(Status.PULADA, "já candidatada nesta conta");
+            if (url.contains("/reproved")) return reprovada(corpo);
             if (paginaDeLogin(d, url))
                 return new Desfecho(Status.PRECISA_USUARIO, "login necessário no Gupy");
             if (corpo.toLowerCase().contains("captcha") || corpo.contains("verificação de segurança"))
@@ -190,6 +230,7 @@ public class GupyDriver implements PortalDriver {
                     pausa(1000); // o botão pode estar desabilitado enquanto a etapa carrega
                 }
             }
+            if (botao == null && d.getCurrentUrl().contains("/reproved")) return reprovada(texto(d));
             if (botao == null) return new Desfecho(Status.ERRO, "nenhum botão de avanço encontrado (passo " + passo + ") · " + diagnosticoPagina(d));
             if (botao.getText().trim().equals("Finalizar candidatura") && dryRun)
                 return new Desfecho(Status.PRONTA_DRY_RUN, "dry-run: formulário completo, não enviado");
@@ -222,8 +263,9 @@ public class GupyDriver implements PortalDriver {
             if (!el.isDisplayed() || !el.isEnabled() || !valor(el).isBlank()) continue;
             String pergunta = rotulo(d, el);
             if (pergunta.isBlank()) continue;
+            if (Texto.perguntaEmIngles(pergunta)) return new Desfecho(Status.PULADA, "vaga em inglês: " + pergunta);
             boolean area = "textarea".equalsIgnoreCase(el.getTagName());
-            var res = situacoes.resolver("Gupy", pergunta, contexto, cv, area, continuar);
+            var res = situacoes.resolver("Gupy", pergunta, contexto, cv, area, PortalWebDriver.limiteDoCampo(el, pergunta), continuar);
             switch (res.tipo()) {
                 case SENSIVEL -> {
                     return new Desfecho(Status.PRECISA_USUARIO, "dado sensível: " + pergunta);
@@ -231,10 +273,28 @@ public class GupyDriver implements PortalDriver {
                 case SEM_RESPOSTA -> {
                     return new Desfecho(Status.PRECISA_USUARIO, "sem resposta para: " + pergunta);
                 }
-                default -> el.sendKeys(res.resposta());
+                default -> escrever(d, el, PortalWebDriver.ajustar(el, pergunta, res.resposta()));
             }
         }
         return Radios.preencher(d, situacoes, "Gupy", contexto, cv, continuar);
+    }
+
+    /**
+     * Escreve por JavaScript (setter nativo + eventos de input/change, que o React do Gupy enxerga): digitar tecla a tecla
+     * com {@code sendKeys} chegou a levar 2 minutos numa página pesada. Se o valor não grudar, digita.
+     */
+    private static void escrever(WebDriver d, WebElement el, String valor) {
+        try {
+            ((JavascriptExecutor) d).executeScript(
+                    "var e=arguments[0];e.scrollIntoView({block:'center'});e.focus();"
+                            + "var set=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e),'value').set;set.call(e,arguments[1]);"
+                            + "e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));"
+                            + "e.dispatchEvent(new Event('blur',{bubbles:true}));", el, valor);
+            if (valor.equals(valor(el))) return;
+        } catch (org.openqa.selenium.WebDriverException e) {
+            // cai no teclado abaixo
+        }
+        el.sendKeys(valor);
     }
 
     /**

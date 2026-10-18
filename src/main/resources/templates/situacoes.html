@@ -5,36 +5,156 @@
 <nav th:replace="~{layout :: menu(${pagina})}"></nav>
 <main>
   <h1>Situações e perguntas aprendidas</h1>
-  <p class="mut">Cada linha é uma regra: quando a pergunta (ou uma muito parecida) aparece, a resposta é aplicada sem chamar a IA.</p>
-  <div class="card">
-    <b>Nova situação</b>
-    <form th:action="@{/situacoes/salvar}" method="post">
-      <input type="text" name="pergunta" placeholder="Pergunta / situação como aparece no formulário">
-      <textarea name="resposta" placeholder="Resposta ou instrução (prompt) a aplicar"></textarea>
-      <button>Adicionar</button>
-    </form>
+  <p class="mut lead">Cada linha é uma regra que o robô usa quando encontra uma pergunta igual ou muito parecida num formulário.</p>
+
+  <div class="card tipos">
+    <div>
+      <span class="tipo">Resposta pronta</span>
+      <p>O texto salvo <b>vai direto para o campo</b> do formulário, sem chamar a IA. Ex.: “Sim”, “7.000”, “Linkedin”.</p>
+    </div>
+    <div class="ia">
+      <span class="tipo ia">Instrução pra IA</span>
+      <p>O texto salvo <b>não vai para o formulário</b>. É o pedido que a IA recebe para escrever uma resposta nova
+        para cada vaga, com base no currículo. O que ela escreveu fica em <a th:href="@{/textos}">Textos da IA</a>.</p>
+    </div>
   </div>
-  <div class="card" th:each="s : ${itens}">
-    <form th:action="@{/situacoes/salvar}" method="post">
-      <input type="hidden" name="id" th:value="${s.id}">
-      <div class="row">
-        <span class="tag" th:classappend="${s.status}" th:text="${s.status}"></span>
-        <span class="tag" th:text="${s.origem}"></span>
-        <span class="mut" th:text="${s.portal} + ' · ' + ${s.usos} + ' uso(s) · ' + ${s.criadoEm}"></span>
-      </div>
-      <input type="text" name="pergunta" th:value="${s.padraoPergunta}" style="margin-top:6px">
-      <textarea name="resposta" th:text="${s.promptOuResposta}"></textarea>
-      <div class="row">
-        <select name="status">
-          <option th:each="o : ${ {'ativa','inativa'} }" th:value="${o}" th:text="${o}" th:selected="${o==s.status}"></option>
-          <option th:if="${s.status!='ativa' and s.status!='inativa'}" th:value="${s.status}" th:text="${s.status}" selected></option>
+
+  <div class="barra">
+    <input type="search" id="busca" placeholder="Buscar na pergunta ou na resposta…" autocomplete="off">
+    <div class="seg" id="filtroTipo">
+      <button type="button" data-v="" class="on">Todas<span class="n"></span></button>
+      <button type="button" data-v="pergunta">Respostas prontas<span class="n"></span></button>
+      <button type="button" data-v="personalizada">Instruções pra IA<span class="n"></span></button>
+    </div>
+    <select id="filtroStatus" aria-label="Status">
+      <option value="">Qualquer status</option>
+      <option value="ativa">Ativas</option>
+      <option value="inativa">Inativas</option>
+      <option value="pendente">Pendentes</option>
+    </select>
+    <span class="mut" id="contagem"></span>
+  </div>
+
+  <div class="card">
+    <details class="novo">
+      <summary>+ Nova regra</summary>
+      <form th:action="@{/situacoes/salvar}" method="post">
+        <label class="mut">Tipo</label>
+        <select name="tipo">
+          <option value="pergunta">Resposta pronta (vai direto para o campo)</option>
+          <option value="personalizada">Instrução pra IA (a IA escreve por vaga)</option>
         </select>
-        <button>Salvar</button>
-        <button class="del" th:formaction="@{/situacoes/{id}/excluir(id=${s.id})}" onclick="return confirm('Excluir?')">Excluir</button>
+        <label class="mut">Pergunta como aparece no formulário</label>
+        <input type="text" name="pergunta" required>
+        <label class="mut">Resposta ou instrução</label>
+        <textarea name="resposta"></textarea>
+        <div class="row" style="margin-top:8px"><button>Adicionar</button></div>
+      </form>
+    </details>
+  </div>
+
+  <div id="lista">
+    <details class="item" th:each="s : ${itens}" th:id="'s-' + ${s.id}"
+             th:with="ia=${s.tipo == 'personalizada'}, t=${ultimoTexto[s.padraoPergunta]}"
+             th:classappend="${(ia ? 'ia ' : '') + s.status}"
+             th:attr="data-tipo=${s.tipo},data-status=${s.status},data-busca=${s.padraoPergunta + ' ' + (s.promptOuResposta ?: '')}">
+      <summary>
+        <span class="tipo" th:classappend="${ia} ? 'ia'" th:text="${ia} ? 'Instrução pra IA' : 'Resposta pronta'"></span>
+        <span class="perg" th:text="${s.padraoPergunta}"></span>
+        <span class="lado">
+          <span class="tag" th:classappend="${s.status}" th:text="${#strings.replace(s.status, '_', ' ')}"></span><br>
+          <span class="mut" th:text="${s.usos} + (${s.usos == 1} ? ' uso' : ' usos')"></span>
+        </span>
+        <span class="resp" th:if="${ia}"><span class="mut">Clique para ver a instrução e o último texto gerado</span></span>
+        <span class="resp" th:if="${!ia and s.promptOuResposta != null and !s.promptOuResposta.isBlank()}">→ <b th:text="${s.promptOuResposta}"></b></span>
+        <span class="resp mut" th:if="${!ia and (s.promptOuResposta == null or s.promptOuResposta.isBlank())}">sem resposta ainda</span>
+      </summary>
+      <div class="corpo">
+        <form th:action="@{/situacoes/salvar}" method="post">
+          <input type="hidden" name="id" th:value="${s.id}">
+          <label>Pergunta como aparece no formulário</label>
+          <input type="text" name="pergunta" th:value="${s.padraoPergunta}">
+          <label th:if="${ia}">Instrução que a IA recebe <span class="ajuda">(não vai para o formulário)</span></label>
+          <label th:unless="${ia}">Resposta que vai para o campo</label>
+          <textarea name="resposta" th:text="${s.promptOuResposta}"></textarea>
+
+          <div class="ultimo" th:if="${ia and t != null}">
+            <span class="mut" th:text="'Último texto que a IA escreveu com esta instrução · ' + ${t.portal} + ' · ' + ${t.criadoEm}"></span>
+            <pre th:text="${t.texto}"></pre>
+          </div>
+          <p class="mut" th:if="${ia and t == null}">A IA ainda não escreveu texto para esta pergunta (ou ele já saiu dos 200 mais recentes).</p>
+
+          <p class="mut" style="margin:10px 0 0"
+             th:text="${(origens[s.origem] ?: s.origem) + (s.portal == null or s.portal.isBlank() ? '' : ' · ' + s.portal) + ' · criada em ' + s.criadoEm}"></p>
+          <details th:if="${s.contexto != null and !s.contexto.isBlank()}" style="margin-top:6px">
+            <summary class="mut" style="cursor:pointer">Ver a vaga onde a pergunta apareceu</summary>
+            <pre th:text="${s.contexto}"></pre>
+          </details>
+
+          <div class="row acoes">
+            <div class="row">
+              <select name="status" aria-label="Status">
+                <option th:each="o : ${ {'ativa','inativa'} }" th:value="${o}" th:text="${o}" th:selected="${o==s.status}"></option>
+                <option th:if="${s.status!='ativa' and s.status!='inativa'}" th:value="${s.status}" th:text="${#strings.replace(s.status, '_', ' ')}" selected></option>
+              </select>
+              <button>Salvar</button>
+            </div>
+            <button class="del" th:formaction="@{/situacoes/{id}/excluir(id=${s.id})}" onclick="return confirm('Excluir esta regra?')">Excluir</button>
+          </div>
+        </form>
       </div>
-      <p class="mut" th:if="${s.contexto != null and !s.contexto.isBlank()}" th:text="'Contexto: ' + ${s.contexto}"></p>
-    </form>
+    </details>
+    <p class="mut vazio" id="nada" hidden>Nenhuma regra com esses filtros.</p>
   </div>
 </main>
+<script>
+(() => {
+  const itens = [...document.querySelectorAll('details.item')];
+  const busca = document.getElementById('busca');
+  const status = document.getElementById('filtroStatus');
+  const botoes = [...document.querySelectorAll('#filtroTipo button')];
+  const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  itens.forEach(d => d.dataset.n = norm(d.dataset.busca));
+  let tipo = '';
+
+  const guardar = () => { try { localStorage.setItem('situacoes.filtro', JSON.stringify({tipo, status: status.value})); } catch (e) {} };
+  try {
+    const f = JSON.parse(localStorage.getItem('situacoes.filtro') || '{}');
+    tipo = f.tipo || ''; status.value = f.status || '';
+  } catch (e) {}
+
+  const statusOk = (d) => !status.value || (status.value === 'pendente'
+      ? !['ativa', 'inativa'].includes(d.dataset.status) : d.dataset.status === status.value);
+
+  function aplicar() {
+    const q = norm(busca.value).trim();
+    let vis = 0;
+    const cont = {'': 0, pergunta: 0, personalizada: 0};
+    itens.forEach(d => {
+      const base = statusOk(d) && (!q || d.dataset.n.includes(q));
+      if (base) { cont['']++; cont[d.dataset.tipo] = (cont[d.dataset.tipo] || 0) + 1; }
+      const ok = base && (!tipo || d.dataset.tipo === tipo);
+      d.hidden = !ok;
+      if (ok) vis++;
+    });
+    botoes.forEach(b => { b.classList.toggle('on', b.dataset.v === tipo); b.querySelector('.n').textContent = cont[b.dataset.v] || 0; });
+    document.getElementById('contagem').textContent = vis + ' de ' + itens.length;
+    document.getElementById('nada').hidden = vis > 0;
+  }
+
+  botoes.forEach(b => b.addEventListener('click', () => { tipo = b.dataset.v; guardar(); aplicar(); }));
+  status.addEventListener('change', () => { guardar(); aplicar(); });
+  busca.addEventListener('input', aplicar);
+  aplicar();
+
+  // depois de salvar, volta aberta na regra editada
+  const alvo = location.hash && document.querySelector(location.hash);
+  if (alvo && alvo.matches('details.item')) {
+    alvo.hidden = false;
+    alvo.open = true;
+    alvo.scrollIntoView({block: 'center'});
+  }
+})();
+</script>
 </body>
 </html>

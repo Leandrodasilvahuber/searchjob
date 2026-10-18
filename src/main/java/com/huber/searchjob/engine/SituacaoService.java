@@ -28,6 +28,7 @@ public class SituacaoService {
     private static final String[] SENSIVEL = {"rg", "numero do rg", "nome do pai", "nome completo do pai",
             "senha", "conta bancaria", "agencia", "dados bancarios", "cartao"};
 
+    private static final long BIP_A_CADA_MS = 10_000;
     private final SituacaoRepo repo;
     private final KvRepo kv;
     private final IaClient ia;
@@ -71,7 +72,20 @@ public class SituacaoService {
     private static final String[] DISCURSIVAS = {"apresent", "conte", "fale sobre", "descreva", "por que", "porque voce",
             "motivo", "motivacao", "carta", "sobre voce", "diferencial", "mensagem para", "fale um pouco"};
     static final String INSTRUCAO_PADRAO =
+            "Responda direto ao que foi perguntado, de forma natural e curta, citando só a experiência do currículo que importa para esta vaga.";
+    /** Instrução antiga, gravada nas regras "personalizada" já existentes: vale a nova. */
+    private static final String INSTRUCAO_ANTIGA =
             "Escreva uma resposta personalizada para esta vaga, destacando as experiências do currículo mais relevantes para ela.";
+
+    /** Campo de dado objetivo (salário, matrícula, links): resposta curta vinda dos dados/preferências, nunca um texto de apresentação. */
+    private static final String[] FATUAIS = {"salari", "remunera", "pretens", "expectativa", "matricula", "indicad",
+            "linkedin", "github", "portfolio", "site", "url", "link"};
+
+    public static boolean fatual(String pergunta) {
+        String n = Texto.normalizar(pergunta);
+        for (String k : FATUAIS) if (n.contains(k)) return true;
+        return false;
+    }
 
     /** Texto livre (área de texto ou pergunta aberta): a IA escreve sob medida para cada vaga em vez de reaproveitar. */
     public static boolean discursiva(String pergunta, boolean areaDeTexto) {
@@ -87,7 +101,25 @@ public class SituacaoService {
      */
     public Resultado resolver(String portal, String pergunta, String contextoVaga, Cv cv, boolean areaDeTexto,
                               BooleanSupplier continuar) {
-        if (!sensivel(pergunta) && discursiva(pergunta, areaDeTexto) && ia.configurado()) {
+        return resolver(portal, pergunta, contextoVaga, cv, areaDeTexto, null, continuar);
+    }
+
+    /** @param limite restrição do campo (tamanho máximo, só número) repassada à IA; null quando não há */
+    public Resultado resolver(String portal, String pergunta, String contextoVaga, Cv cv, boolean areaDeTexto,
+                              String limite, BooleanSupplier continuar) {
+        this.limite = limite == null || limite.isBlank() ? "" : "\n\nLIMITE DO CAMPO (obrigatório, a resposta tem que caber inteira e continuar completa e natural):\n" + limite;
+        long inicio = System.currentTimeMillis();
+        ia.esquecerModelo();
+        Resultado r = resolverPergunta(portal, pergunta, contextoVaga, cv, areaDeTexto, continuar);
+        EventoJson.pergunta(portal, contextoVaga, pergunta, areaDeTexto, r, System.currentTimeMillis() - inicio, ia.ultimoModelo());
+        return r;
+    }
+
+    private volatile String limite = "";
+
+    private Resultado resolverPergunta(String portal, String pergunta, String contextoVaga, Cv cv, boolean areaDeTexto,
+                                       BooleanSupplier continuar) {
+        if (!sensivel(pergunta) && !fatual(pergunta) && discursiva(pergunta, areaDeTexto) && ia.configurado()) {
             Resultado r = gerarPersonalizado(portal, pergunta, contextoVaga, cv);
             if (r != null) return r;
         }
@@ -96,7 +128,10 @@ public class SituacaoService {
             return new Resultado(Tipo.SENSIVEL, null, 0);
         }
 
-        Optional<Situacao> achada = buscar(portal, pergunta);
+        // a instrução de "texto personalizado" não é resposta: nunca vai para o campo
+        // pretensão sem regime na pergunta: o valor (CLT ou PJ) depende da vaga, então a resposta de outra vaga não serve
+        Optional<Situacao> achada = salarioSemRegime(pergunta) ? Optional.empty()
+                : buscar(portal, pergunta).filter(x -> !"personalizada".equals(x.tipo()));
         if (achada.isPresent()) {
             Situacao s = achada.get();
             repo.incrementarUso(s.id());
@@ -108,9 +143,13 @@ public class SituacaoService {
         // já existe pendência aberta para esta pergunta (outra tentativa ou rodada): reusa em vez de duplicar
         Optional<Situacao> aberta = repo.pendentePorHash(hash);
         if (aberta.isPresent()) {
+            // resposta que a IA já achou nos dados: vale agora; a revisão em Pendências fica para depois, sem travar a vaga
+            if (SituacaoRepo.PENDENTE_CONFIRMACAO.equals(aberta.get().status()) && !nulo(aberta.get().promptOuResposta())) {
+                repo.incrementarUso(aberta.get().id());
+                return new Resultado(Tipo.APLICADA, aberta.get().promptOuResposta(), aberta.get().id());
+            }
             if (naoInteragir()) return new Resultado(Tipo.SEM_RESPOSTA, null, aberta.get().id());
-            aviso.chamarUsuario();
-            return aguardar(aberta.get().id(),
+            return aguardar(portal, pergunta, aberta.get().id(),
                     SituacaoRepo.PENDENTE_CONFIRMACAO.equals(aberta.get().status()) ? Tipo.CONFIRMADA_PELO_USUARIO : Tipo.RESPONDIDA_PELO_USUARIO,
                     continuar);
         }
@@ -121,19 +160,25 @@ public class SituacaoService {
             } catch (RuntimeException e) {
                 r = null;
             }
-            if (r != null && r.path("resolvido").asBoolean(false) && !r.path("resposta").asText("").isBlank()) {
+            if (r != null && r.path("resolvido").asBoolean(false) && !nulo(r.path("resposta").asText(""))) {
+                // o que a IA achou nos dados vale como regra na hora: o usuário só é chamado quando não há resposta
                 id = repo.inserir(portal, "pergunta", pergunta, hash, r.path("resposta").asText(),
-                        "ia", SituacaoRepo.PENDENTE_CONFIRMACAO, contextoVaga);
-                if (naoInteragir()) return new Resultado(Tipo.SEM_RESPOSTA, null, id);
-                aviso.chamarUsuario();
-                return aguardar(id, Tipo.CONFIRMADA_PELO_USUARIO, continuar);
+                        "ia", SituacaoRepo.ATIVA, contextoVaga);
+                return new Resultado(Tipo.APLICADA, r.path("resposta").asText(), id);
             }
         }
+        // campo declarado opcional e sem dado para preencher: segue em branco em vez de chamar o usuário
+        if (opcional(pergunta)) return new Resultado(Tipo.APLICADA, "", 0);
         id = repo.inserir(portal, "pergunta", pergunta, hash, null, "usuario",
                 SituacaoRepo.AGUARDANDO_USUARIO, contextoVaga);
         if (naoInteragir()) return new Resultado(Tipo.SEM_RESPOSTA, null, id);
-        aviso.chamarUsuario();
-        return aguardar(id, Tipo.RESPONDIDA_PELO_USUARIO, continuar);
+        return aguardar(portal, pergunta, id, Tipo.RESPONDIDA_PELO_USUARIO, continuar);
+    }
+
+    static boolean salarioSemRegime(String pergunta) {
+        String n = " " + Texto.normalizar(pergunta) + " ";
+        return PortalWebDriver.ehSalario(pergunta) && !n.contains(" pj ") && !n.contains(" clt ") && !n.contains("prestador")
+                && !n.contains("cooperad") && !n.contains("atual") && !n.contains("ultima");
     }
 
     /** Modo "não interagir": pergunta sem resposta vira vaga pulada, sem bip nem espera (a pendência fica registrada). */
@@ -141,21 +186,49 @@ public class SituacaoService {
         return kv.booleano(KvRepo.CONFIG, "nao_interagir", false);
     }
 
-    private Resultado aguardar(long id, Tipo tipoOk, BooleanSupplier continuar) {
-        while (continuar.getAsBoolean()) {
-            Optional<Situacao> s = repo.porId(id);
-            if (s.isEmpty()) return new Resultado(Tipo.SEM_RESPOSTA, null, id);
-            if (SituacaoRepo.ATIVA.equals(s.get().status()))
-                return new Resultado(tipoOk, s.get().promptOuResposta(), id);
-            if (SituacaoRepo.INATIVA.equals(s.get().status())) return new Resultado(Tipo.SEM_RESPOSTA, null, id);
-            try {
-                Thread.sleep(2000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
+    /** Pergunta que está pausando a vaga agora (o painel mostra o alerta com o link para Pendências). */
+    public record Espera(String portal, String pergunta) {}
+
+    private volatile Espera esperando;
+    private volatile boolean pularEspera;
+
+    public Espera esperando() {
+        return esperando;
+    }
+
+    /** O usuário escolheu pular a vaga em vez de responder. */
+    public void pularEspera() {
+        if (esperando != null) pularEspera = true;
+    }
+
+    private Resultado aguardar(String portal, String pergunta, long id, Tipo tipoOk, BooleanSupplier continuar) {
+        pularEspera = false;
+        esperando = new Espera(portal, pergunta);
+        long ultimoBip = 0;
+        try {
+            while (continuar.getAsBoolean() && !pularEspera) {
+                Optional<Situacao> s = repo.porId(id);
+                if (s.isEmpty()) return new Resultado(Tipo.SEM_RESPOSTA, null, id);
+                if (SituacaoRepo.ATIVA.equals(s.get().status()))
+                    return new Resultado(tipoOk, s.get().promptOuResposta(), id);
+                if (SituacaoRepo.INATIVA.equals(s.get().status())) return new Resultado(Tipo.SEM_RESPOSTA, null, id);
+                long agora = System.currentTimeMillis();
+                if (agora - ultimoBip >= BIP_A_CADA_MS) {
+                    ultimoBip = agora;
+                    aviso.chamarUsuario();
+                }
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
+            return new Resultado(Tipo.SEM_RESPOSTA, null, id);
+        } finally {
+            esperando = null;
+            pularEspera = false;
         }
-        return new Resultado(Tipo.SEM_RESPOSTA, null, id);
     }
 
     private Resultado gerarPersonalizado(String portal, String pergunta, String contextoVaga, Cv cv) {
@@ -166,8 +239,10 @@ public class SituacaoService {
         if (achada.isPresent()) {
             Situacao s = achada.get();
             id = s.id();
-            if ("personalizada".equals(s.tipo())) instrucao = nvl(s.promptOuResposta(), INSTRUCAO_PADRAO);
-            else aprovada = nvl(s.promptOuResposta(), "");
+            // regra "personalizada" guarda instrução (a antiga vale como a padrão); só "pergunta" traz resposta aprovada
+            if ("personalizada".equals(s.tipo())) {
+                if (!INSTRUCAO_ANTIGA.equals(s.promptOuResposta())) instrucao = nvl(s.promptOuResposta(), INSTRUCAO_PADRAO);
+            } else aprovada = nvl(s.promptOuResposta(), "");
             repo.incrementarUso(id);
         } else {
             id = repo.inserir(portal, "personalizada", pergunta, Texto.hash(pergunta), INSTRUCAO_PADRAO,
@@ -176,12 +251,16 @@ public class SituacaoService {
         try {
             String pedido = "PERGUNTA/CAMPO:\n" + pergunta + "\n\nINSTRUÇÕES DO CANDIDATO PARA ESTE TIPO DE CAMPO:\n" + instrucao
                     + (aprovada.isBlank() ? "" : "\n\nRESPOSTA APROVADA ANTERIORMENTE (base de fatos e de tom):\n" + aprovada)
+                    + limite
                     + "\n\nVAGA:\n" + nvl(contextoVaga, "")
                     + "\n\nDADOS FIXOS:\n" + cvContexto.dadosParaPrompt()
-                    + "\n\nCURRÍCULO ESCOLHIDO PARA ESTA VAGA:\n"
-                    + (cv != null && cv.textoExtraido() != null ? cv.textoExtraido() : cvContexto.textoCvs());
+                    + (cv != null && cv.textoExtraido() != null
+                        ? "\n\nCURRÍCULO ENVIADO PARA ESTA VAGA:\n" + cv.textoExtraido()
+                          + "\n\nOUTROS CURRÍCULOS DO CANDIDATO (mesma pessoa, outro foco; os fatos também valem):\n"
+                          + cvContexto.textoCvs()
+                        : "\n\nCURRÍCULOS DO CANDIDATO:\n" + cvContexto.textoCvs());
             String texto = ia.conversar(SYSTEM_TEXTO, pedido).trim();
-            if (texto.isBlank()) return null;
+            if (texto.isBlank() || "null".equalsIgnoreCase(texto)) return null;
             textos.inserir(portal, pergunta, primeiraLinha(contextoVaga), cv == null ? "" : cv.nome(), texto);
             return new Resultado(Tipo.APLICADA, texto, id);
         } catch (RuntimeException e) {
@@ -200,7 +279,20 @@ public class SituacaoService {
                 + "\n\nDADOS FIXOS:\n" + cvContexto.dadosParaPrompt()
                 + "\n\nRESPOSTAS JÁ SALVAS (as mais parecidas com a pergunta):\n" + cvContexto.respostasSalvas(s.padraoPergunta(), 40)
                 + "\n\nCURRÍCULOS:\n" + cvContexto.textoCvs();
-        return ia.conversar(SYSTEM_TEXTO, pedido).trim();
+        ia.esquecerModelo();
+        String texto = ia.conversar(SYSTEM_TEXTO, pedido).trim();
+        EventoJson.sugestao(s.portal(), s.padraoPergunta(), s.contexto(), texto, ia.ultimoModelo());
+        return texto;
+    }
+
+    public static boolean opcional(String pergunta) {
+        String n = Texto.normalizar(pergunta);
+        return !n.contains("opcoes") && (n.contains("opcional") || n.contains("nao e necessario o preenchimento")
+                || n.contains("caso voce") || n.contains("se aplicavel") || n.contains("quando aplicavel"));
+    }
+
+    private static boolean nulo(String s) {
+        return s == null || s.isBlank() || "null".equalsIgnoreCase(s.trim());
     }
 
     private static String nvl(String s, String padrao) {
@@ -215,12 +307,22 @@ public class SituacaoService {
 
     private static final String SYSTEM_TEXTO = """
             Você escreve, em primeira pessoa e em português do Brasil, a resposta de um candidato para um campo de texto livre
-            (apresentação, motivação, experiência) de uma candidatura. Adapte ao máximo à vaga indicada, destacando do currículo
-            fornecido apenas o que for relevante para ela.
+            de uma candidatura. O candidato é um programador sênior: responda com a segurança e a objetividade de um
+            desenvolvedor sênior (fale de arquitetura, decisões técnicas e resultados concretos do currículo, sem se
+            diminuir nem exagerar). Se houver LIMITE DO CAMPO no pedido, ele manda: a resposta já nasce nesse tamanho. Escreva como uma pessoa de verdade escreveria num formulário: direto, simples e natural.
+            Responda exatamente o que foi perguntado, sem rodeios e sem repetir a pergunta. Seja breve e sintético: em geral
+            uma frase curta (até 150 caracteres); no máximo 2 frases curtas (até 250 caracteres) em apresentação, motivação
+            ou pergunta que pede "comente". Cite no máximo uma experiência do currículo, a que mais importa para a vaga.
+            Valores (salário) só com o número, ex.: 10.000.
+            Perfil técnico do candidato: full stack, com backend em Node.js/TypeScript, Java (Spring Boot) e PHP (Laravel) e
+            frontend em React e Vue.js. Quando a pergunta falar de experiência, stack ou perfil, mostre esse leque: puxe primeiro
+            o que a vaga pede e, se couber, junte Node.js, Java, React e Vue.js ao PHP/Laravel numa frase natural (ex.: "backend
+            em Node.js, Java e Laravel, frontend em React e Vue"). Nunca omita PHP/Laravel quando a vaga pedir PHP.
+            Se a vaga pedir uma tecnologia que ele não tem, diga isso numa frase e aponte a mais próxima que ele usa.
             Regras: use somente fatos do currículo e dos dados fixos; nunca invente empresa, tecnologia, tempo ou resultado;
             se a vaga pedir algo que o currículo não mostra, não mencione. Inglês: nunca afirme fluência oral.
-            Tom profissional e direto, sem clichês nem saudações genéricas, de 3 a 6 frases (até 800 caracteres), sem markdown,
-            sem títulos e sem aspas. Responda SOMENTE com o texto final, pronto para colar no campo.
+            Evite tom de propaganda, clichês, adjetivos exagerados ("apaixonado", "dinâmico"), listas de siglas e saudações.
+            Sem markdown, sem títulos e sem aspas. Responda SOMENTE com o texto final, pronto para colar no campo.
             """;
 
     /** Usuário confirma (ou corrige) a resposta da IA: vira regra ativa, origem ia_confirmada. */
@@ -236,16 +338,25 @@ public class SituacaoService {
     }
 
     private static final String SYSTEM = """
-            Você preenche formulários de candidatura em nome do candidato. Responda SOMENTE com JSON:
-            {"resolvido": true|false, "resposta": "texto curto pronto para o campo", "motivo": "por quê"}.
+            Você preenche formulários de candidatura em nome de um programador sênior: as respostas têm a segurança e a
+            objetividade de um desenvolvedor sênior. Se houver LIMITE DO CAMPO no pedido (tamanho máximo ou só número), a
+            resposta já tem que respeitá-lo. Responda SOMENTE com JSON:
+            {"resolvido": true|false, "resposta": "o mínimo que responde: palavra, número ou frase curta (até 100 caracteres)", "motivo": "por quê"}.
             Regras: use apenas fatos do CV, dos dados fixos e das respostas já salvas. Nunca invente experiência.
             Se faltar informação, responda {"resolvido": false, "resposta": "", "motivo": "o que falta"}.
-            Pretensão: PJ e CLT conforme as preferências. Dados sensíveis (RG, nome do pai, senhas, bancários) => não resolvido.
+            Pretensão salarial: só o valor mensal, sem R$ e sem texto (ex.: 10.000). Regime: o da pergunta; se ela não diz, o
+            da VAGA (PJ, CLT, cooperado = PJ); valores conforme as PREFERÊNCIAS. Anos de experiência: só o número (ex.: 5); tecnologia que não aparece no CV => resolvido com "0". Dados sensíveis (RG, nome do pai, senhas, bancários) => não resolvido.
             """;
 
     private String montarPedido(String pergunta, String contextoVaga) {
         StringBuilder sb = new StringBuilder();
-        sb.append("PERGUNTA DO FORMULÁRIO:\n").append(pergunta).append("\n\nVAGA:\n").append(contextoVaga == null ? "" : contextoVaga);
+        sb.append("DATA DE HOJE: ").append(java.time.LocalDate.now()).append(" (use para calcular tempo de experiência)\n\n")
+                .append("PERGUNTA DO FORMULÁRIO:\n").append(pergunta)
+                .append(pergunta.contains("[opções:")
+                        ? pergunta.startsWith(Checkboxes.MARCADOR) ? "\n(Responda com o texto exato das opções que se aplicam, separadas por \" | \".)"
+                        : "\n(Responda com o texto exato de UMA das opções.)" : "")
+                .append(limite)
+                .append("\n\nVAGA:\n").append(contextoVaga == null ? "" : contextoVaga);
         sb.append("\n\nDADOS FIXOS:\n").append(cvContexto.dadosParaPrompt());
         sb.append("\n\nPREFERÊNCIAS:\n").append(kv.todos(KvRepo.PREF));
         sb.append("\n\nRESPOSTAS JÁ SALVAS (as mais parecidas com a pergunta):\n").append(cvContexto.respostasSalvas(pergunta, 40));

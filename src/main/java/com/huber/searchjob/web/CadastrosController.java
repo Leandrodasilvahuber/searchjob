@@ -70,23 +70,33 @@ public class CadastrosController {
 
     // --- situações / perguntas ---
 
+    private static final Map<String, String> ORIGENS = Map.of("md", "importada do .md", "ia", "achada pela IA",
+            "ia_confirmada", "IA, confirmada por você", "usuario", "escrita por você");
+
     @GetMapping("/situacoes")
     public String situacoesTela(Model m) {
+        // último texto que a IA escreveu para cada pergunta (recentes() vem do mais novo para o mais antigo)
+        Map<String, TextoGeradoRepo.TextoGerado> ultimoTexto = new LinkedHashMap<>();
+        textos.recentes().forEach(t -> ultimoTexto.putIfAbsent(t.pergunta(), t));
         m.addAttribute("itens", situacoes.todas());
+        m.addAttribute("ultimoTexto", ultimoTexto);
+        m.addAttribute("origens", ORIGENS);
         m.addAttribute("pagina", "situacoes");
         return "situacoes";
     }
 
     @PostMapping("/situacoes/salvar")
     public String situacaoSalvar(@RequestParam(required = false) Long id, @RequestParam String pergunta,
-                                 @RequestParam String resposta, @RequestParam(defaultValue = "ativa") String status) {
+                                 @RequestParam String resposta, @RequestParam(defaultValue = "ativa") String status,
+                                 @RequestParam(defaultValue = "pergunta") String tipo) {
         if (id == null) {
-            situacoes.inserir("", "pergunta", pergunta, Texto.hash(pergunta), resposta, "usuario", status, "");
+            String t = "personalizada".equals(tipo) ? "personalizada" : "pergunta";
+            id = situacoes.inserir("", t, pergunta, Texto.hash(pergunta), resposta, "usuario", status, "");
         } else {
             String origem = situacoes.porId(id).map(s -> s.origem()).orElse("usuario");
             situacoes.atualizar(id, pergunta, Texto.hash(pergunta), resposta, status, "md".equals(origem) ? "md" : origem);
         }
-        return "redirect:/situacoes";
+        return "redirect:/situacoes#s-" + id;
     }
 
     @PostMapping("/situacoes/{id}/excluir")
@@ -175,7 +185,10 @@ public class CadastrosController {
 
     @GetMapping("/textos")
     public String textosTela(Model m) {
-        m.addAttribute("itens", textos.recentes());
+        List<TextoGeradoRepo.TextoGerado> itens = textos.recentes();
+        m.addAttribute("itens", itens);
+        m.addAttribute("portais", itens.stream().map(TextoGeradoRepo.TextoGerado::portal)
+                .filter(p -> p != null && !p.isBlank()).distinct().sorted().toList());
         m.addAttribute("pagina", "textos");
         return "textos";
     }

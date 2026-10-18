@@ -49,6 +49,7 @@ public class CvContexto {
     /** As {@code max} respostas salvas mais parecidas com a pergunta (a base inteira não cabe no pedido à IA). */
     public String respostasSalvas(String pergunta, int max) {
         return situacoes.ativas().stream()
+                .filter(s -> !"personalizada".equals(s.tipo())) // instrução para a IA, não é resposta
                 .filter(s -> !sensivel(s.padraoPergunta()) && !CPF.matcher(String.valueOf(s.promptOuResposta())).find())
                 .sorted(java.util.Comparator.comparingDouble((Situacao s) -> -Texto.similaridade(pergunta, s.padraoPergunta())))
                 .limit(max)

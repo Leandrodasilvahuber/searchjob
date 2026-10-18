@@ -5,17 +5,89 @@
 <nav th:replace="~{layout :: menu(${pagina})}"></nav>
 <main>
   <h1>Textos escritos pela IA</h1>
-  <p class="mut">Cada campo de texto livre/apresentação é escrito sob medida para a vaga e o CV usado. Aqui fica o que foi enviado. Para mudar o estilo, edite a instrução da situação correspondente em Situações.</p>
-  <p class="mut" th:if="${itens.isEmpty()}">Nenhum texto gerado ainda.</p>
-  <div class="card" th:each="t : ${itens}">
-    <div class="row">
-      <span class="tag" th:text="${t.portal}"></span>
-      <span class="mut" th:text="${t.vaga} + ' · CV ' + ${t.cv} + ' · ' + ${t.criadoEm}"></span>
+  <p class="mut lead">O que a IA escreveu e foi enviado em cada campo de texto livre, sob medida para a vaga e o CV usado.
+    O estilo vem da <span class="tipo ia">Instrução pra IA</span> da pergunta em <a th:href="@{/situacoes}">Situações</a>.
+    Os 200 mais recentes.</p>
+
+  <div class="barra">
+    <input type="search" id="busca" placeholder="Buscar na pergunta, na vaga ou no texto…" autocomplete="off">
+    <div class="seg" id="filtroPortal">
+      <button type="button" data-v="" class="on">Todos<span class="n"></span></button>
+      <button type="button" th:each="p : ${portais}" th:attr="data-v=${p}"><span th:text="${p}"></span><span class="n"></span></button>
     </div>
-    <p><b th:text="${t.pergunta}"></b></p>
-    <pre th:text="${t.texto}"></pre>
-    <form th:action="@{/textos/{id}/excluir(id=${t.id})}" method="post"><button class="del">Excluir</button></form>
+    <span class="mut" id="contagem"></span>
+  </div>
+
+  <p class="mut vazio" th:if="${itens.isEmpty()}">Nenhum texto gerado ainda.</p>
+  <div id="lista">
+    <details class="item ia" th:each="t : ${itens}" th:id="'t-' + ${t.id}"
+             th:with="cv=${t.cv == null or t.cv.isBlank() ? '' : (#strings.contains(t.cv, '_CV_') ? #strings.replace(#strings.substringAfter(t.cv, '_CV_'), '_', ' ') : t.cv)}"
+             th:attr="data-portal=${t.portal},data-busca=${t.pergunta + ' ' + t.vaga + ' ' + t.texto}">
+      <summary>
+        <span class="tag" th:text="${t.portal}"></span>
+        <span class="perg" th:text="${t.pergunta}"></span>
+        <span class="lado mut">
+          <span th:text="${#strings.substring(t.criadoEm, 0, 16)}"></span><br>
+          <span th:text="${#strings.length(t.texto)} + ' caracteres'"></span>
+        </span>
+        <span class="resp mut" th:text="${(t.vaga == null or t.vaga.isBlank() ? 'vaga sem título' : t.vaga) + (cv.isEmpty() ? '' : ' · CV ' + cv)}"></span>
+      </summary>
+      <div class="corpo">
+        <label>Texto enviado</label>
+        <pre class="texto" th:text="${t.texto}"></pre>
+        <div class="row acoes">
+          <button type="button" class="sec copiar">Copiar texto</button>
+          <form th:action="@{/textos/{id}/excluir(id=${t.id})}" method="post" style="margin:0">
+            <button class="del" onclick="return confirm('Excluir este texto?')">Excluir</button>
+          </form>
+        </div>
+      </div>
+    </details>
+    <p class="mut vazio" id="nada" hidden>Nenhum texto com esses filtros.</p>
   </div>
 </main>
+<script>
+(() => {
+  const itens = [...document.querySelectorAll('details.item')];
+  const busca = document.getElementById('busca');
+  const botoes = [...document.querySelectorAll('#filtroPortal button')];
+  const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  itens.forEach(d => d.dataset.n = norm(d.dataset.busca));
+  let portal = '';
+  try { portal = localStorage.getItem('textos.portal') || ''; } catch (e) {}
+  if (!botoes.some(b => b.dataset.v === portal)) portal = '';
+
+  function aplicar() {
+    const q = norm(busca.value).trim();
+    const cont = {'': 0};
+    let vis = 0;
+    itens.forEach(d => {
+      const base = !q || d.dataset.n.includes(q);
+      if (base) { cont['']++; cont[d.dataset.portal] = (cont[d.dataset.portal] || 0) + 1; }
+      const ok = base && (!portal || d.dataset.portal === portal);
+      d.hidden = !ok;
+      if (ok) vis++;
+    });
+    botoes.forEach(b => { b.classList.toggle('on', b.dataset.v === portal); b.querySelector('.n').textContent = cont[b.dataset.v] || 0; });
+    document.getElementById('contagem').textContent = vis + ' de ' + itens.length;
+    document.getElementById('nada').hidden = vis > 0 || itens.length === 0;
+  }
+
+  botoes.forEach(b => b.addEventListener('click', () => {
+    portal = b.dataset.v;
+    try { localStorage.setItem('textos.portal', portal); } catch (e) {}
+    aplicar();
+  }));
+  busca.addEventListener('input', aplicar);
+  aplicar();
+
+  document.querySelectorAll('.copiar').forEach(b => b.addEventListener('click', async () => {
+    const texto = b.closest('details').querySelector('.texto').textContent;
+    try { await navigator.clipboard.writeText(texto); b.textContent = 'Copiado ✓'; }
+    catch (e) { b.textContent = 'Não deu para copiar'; }
+    setTimeout(() => { b.textContent = 'Copiar texto'; }, 1500);
+  }));
+})();
+</script>
 </body>
 </html>

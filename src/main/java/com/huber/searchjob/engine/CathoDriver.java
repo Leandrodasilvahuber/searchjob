@@ -31,7 +31,9 @@ public class CathoDriver extends PortalWebDriver {
         String slug = URLEncoder.encode(Texto.normalizar(termo).replace(' ', '-'), StandardCharsets.UTF_8);
         // a Catho devolve vagas sem relação com o termo: o card casando basta; senão lê a descrição completa da vaga
         List<Vaga> out = new ArrayList<>();
-        for (Vaga v : parse(get("https://www.catho.com.br/vagas/" + slug + "/"), Integer.MAX_VALUE, LocalDate.now())) {
+        List<Vaga> lidas = new ArrayList<>(parse(get("https://www.catho.com.br/vagas/" + slug + "/"), Integer.MAX_VALUE, LocalDate.now()));
+        lidas.sort(Vaga.MAIS_RECENTE); // a listagem vem por relevância: mais recentes primeiro
+        for (Vaga v : lidas) {
             if (out.size() >= max) break;
             if (mencionaTermo(v.cargo() + " " + v.descricao(), termo) || mencionaTermo(descricaoCompleta(v.url()), termo))
                 out.add(v);
@@ -111,7 +113,7 @@ public class CathoDriver extends PortalWebDriver {
 
     @Override
     protected String[] botoesEnvio() {
-        return new String[] {"Quero me candidatar", "Enviar currículo", "Enviar candidatura"};
+        return new String[] {"Quero me candidatar", "Enviar currículo", "Enviar meu currículo", "Enviar candidatura"};
     }
 
     @Override

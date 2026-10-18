@@ -98,8 +98,8 @@ public class MdImporter {
         padrao(KvRepo.PREF, "pretensao_clt", "7000");
         padrao(KvRepo.PREF, "recencia_dias", "14");
         padrao(KvRepo.PREF, "termos", "full stack,Vue.js,Laravel,PHP,React,Node.js,backend");
-        padrao(KvRepo.PREF, "stack_proibida", "java-only,.net,golang,python,kotlin,angular,nestjs obrigatorio,react native");
-        padrao(KvRepo.PREF, "excluir_titulos", "estagio,estagiario,estagiaria,jovem aprendiz,banco de talentos");
+        padrao(KvRepo.PREF, "stack_proibida", "java-only,.net,csharp,golang,python,kotlin,angular,nestjs obrigatorio,react native");
+        padrao(KvRepo.PREF, "excluir_titulos", "estagio,estagiario,estagiaria,jovem aprendiz,banco de talentos,junior,jr");
         padrao(KvRepo.PREF, "exige_ingles_oral", "calls em ingles,reunioes em ingles,entrevista em ingles,fluencia oral,conversacao em ingles,ingles conversacional,spoken english,english speaking");
         padrao(KvRepo.CONFIG, "modo", "codigo");
         padrao(KvRepo.CONFIG, "portais", "gupy,linkedin,indeed,catho,programathor");

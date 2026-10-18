@@ -31,15 +31,19 @@ public class LinkedInDriver extends PortalWebDriver {
 
     @Override
     public List<Vaga> buscar(String termo, int max) throws Exception {
+        // a busca pública não ordena por data (sortBy=DD é ignorado): lê até 100 resultados e ordena aqui, mais recentes primeiro
         List<Vaga> out = new ArrayList<>();
-        for (int inicio = 0; out.size() < max && inicio < 100; inicio += POR_PAGINA) {
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (int inicio = 0; inicio < 100; inicio += POR_PAGINA) {
             String html = get("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords="
-                    + URLEncoder.encode(termo, StandardCharsets.UTF_8) + "&geoId=106057199&f_AL=true&f_TPR=r1209600&start=" + inicio);
-            List<Vaga> pagina = parse(html, max - out.size());
+                    + URLEncoder.encode(termo, StandardCharsets.UTF_8) + "&geoId=106057199&f_AL=true&f_TPR=r1209600&sortBy=DD&start=" + inicio);
+            List<Vaga> pagina = parse(html, POR_PAGINA);
             if (pagina.isEmpty()) break;
-            out.addAll(pagina);
+            for (Vaga v : pagina) if (ids.add(v.id())) out.add(v);
+            if (out.size() >= Math.max(max, 100)) break;
         }
-        return out;
+        out.sort(Vaga.MAIS_RECENTE);
+        return out.size() > max ? new ArrayList<>(out.subList(0, max)) : out;
     }
 
     static List<Vaga> parse(String html, int max) {
@@ -66,6 +70,22 @@ public class LinkedInDriver extends PortalWebDriver {
         return out;
     }
 
+    private static final Pattern DESCRICAO = Pattern.compile("show-more-less-html__markup[^>]*>(.*?)</div>", Pattern.DOTALL);
+
+    /** A busca não traz a descrição: lê da página pública da vaga, inteira (sem "ver mais"), para o filtro de idioma e a IA. */
+    @Override
+    public Vaga detalhar(Vaga v) {
+        if (v.descricao() != null && !v.descricao().isBlank()) return v;
+        try {
+            Matcher m = DESCRICAO.matcher(get("https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/" + v.id()));
+            if (!m.find()) return v;
+            return new Vaga(v.portal(), v.id(), v.empresa(), v.cargo(), v.url(), v.local(), v.modalidade(), v.publicada(),
+                    Html.texto(m.group(1)));
+        } catch (Exception e) {
+            return v; // sem a descrição, a checagem na página e nas perguntas ainda pega vaga em inglês
+        }
+    }
+
     @Override
     public boolean entrar(String usuario, String senha) {
         navegador.driver().get("https://www.linkedin.com/login");
@@ -74,8 +94,18 @@ public class LinkedInDriver extends PortalWebDriver {
     }
 
     @Override
+    protected String seletorDescricao() {
+        return ".jobs-description__content,.jobs-box__html-content,#job-details,.jobs-description,.description__text";
+    }
+
+    @Override
     protected String[] botoesAvanco() {
-        return new String[] {"Avançar", "Revisar", "Próximo", "Continuar", "Next", "Review", "Candidatura simplificada", "Easy Apply"};
+        return new String[] {"Avançar", "Revisar", "Avaliar", "Próximo", "Continuar", "Next", "Review", "Candidatura simplificada", "Easy Apply"};
+    }
+
+    @Override
+    protected String[] botoesAbertura() {
+        return new String[] {"Candidatura simplificada", "Easy Apply"};
     }
 
     @Override

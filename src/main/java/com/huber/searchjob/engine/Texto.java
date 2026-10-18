@@ -32,6 +32,44 @@ public final class Texto {
         return Arrays.stream(normalizar(s).split(" ")).filter(t -> !t.isEmpty()).collect(Collectors.toSet());
     }
 
+    private static final Set<String> PALAVRAS_EN = Set.of("the", "and", "with", "for", "you", "your", "will", "our", "we",
+            "of", "to", "in", "is", "are", "have", "be", "as", "on", "or", "this", "that", "experience", "work", "team");
+    private static final Set<String> PALAVRAS_PT = Set.of("de", "da", "do", "das", "dos", "para", "com", "uma", "que", "em",
+            "os", "as", "na", "no", "nas", "nos", "voce", "ou", "um", "por", "se", "experiencia", "equipe", "vaga");
+
+    /** Heurística por palavras funcionais: texto curto demais para decidir não conta como inglês. */
+    public static boolean emIngles(String texto) {
+        return emIngles(texto, 8);
+    }
+
+    /** Igual a {@link #emIngles(String)}, com mínimo próprio de palavras inglesas (formulários são curtos). */
+    public static boolean emIngles(String texto, int minimo) {
+        long en = 0, pt = 0;
+        for (String t : normalizar(texto).split(" ")) {
+            if (PALAVRAS_EN.contains(t)) en++;
+            if (PALAVRAS_PT.contains(t)) pt++;
+        }
+        return en >= minimo && en > 2 * pt;
+    }
+
+    private static final Set<String> PERGUNTA_EN = Set.of("what", "how", "many", "years", "do", "does", "did", "have", "has",
+            "would", "like", "are", "willing", "current", "your", "you", "which", "can", "if", "please", "salary", "expected",
+            "completed", "level", "education", "degree", "able", "authorized", "require", "sponsorship", "located",
+            "currently", "english", "the", "and", "with", "for", "of", "to", "in", "is", "experience", "work", "my");
+    private static final Set<String> PERGUNTA_PT = Set.of("qual", "quais", "quantos", "possui", "tem", "voce", "sua", "seu",
+            "anos", "sim", "nao", "e", "de", "da", "do", "para", "com", "uma", "que", "em", "na", "no", "um", "por", "se",
+            "experiencia", "vaga", "como", "aceita", "sobre");
+
+    /** Pergunta de formulário (curta) em inglês: 2+ palavras inglesas e mais inglesas que portuguesas; "LinkedIn Profile" não conta. */
+    public static boolean perguntaEmIngles(String pergunta) {
+        long en = 0, pt = 0;
+        for (String t : normalizar(pergunta).split(" ")) {
+            if (PERGUNTA_EN.contains(t)) en++;
+            if (PERGUNTA_PT.contains(t)) pt++;
+        }
+        return en >= 2 && en > pt;
+    }
+
     private static final Set<String> STOP = Set.of("o", "a", "os", "as", "um", "uma", "de", "da", "do", "das", "dos",
             "em", "no", "na", "nos", "nas", "para", "por", "com", "que", "voce", "sua", "seu", "suas", "seus", "tem",
             "possui", "qual", "quais", "e", "ou", "ao", "pelo", "pela", "se", "ja", "aqui", "esta", "este", "essa", "esse");

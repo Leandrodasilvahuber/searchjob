@@ -29,6 +29,9 @@
     <p class="mut" id="contadores"
        th:text="${estado.processadas} + ' processadas · ' + ${estado.enviadas} + ' enviadas · ' + ${estado.puladas} + ' puladas · ' + ${estado.erros} + ' erros'"></p>
   </div>
+  <div class="card"><div class="row"><b>Log</b> <button type="button" id="limpar-log" class="sec">Limpar log</button></div>
+    <ul id="log" class="log"></ul>
+  </div>
   <div class="card">
     <b>Modo de avaliação</b>
     <form th:action="@{/modo}" method="post" class="row">
@@ -47,9 +50,6 @@
       <label><input type="checkbox" th:checked="${relatorio}" onchange="document.getElementById('rl').value=this.checked; this.form.submit()"> Gerar relatório na Área de Trabalho (estatísticas e textos da IA)</label>
       <input type="hidden" name="ligado" id="rl" th:value="${relatorio}">
     </form>
-  </div>
-  <div class="card"><div class="row"><b>Log</b> <button type="button" id="limpar-log" class="sec">Limpar log</button></div>
-    <ul id="log" class="log"></ul>
   </div>
   <div id="modal" class="modal" hidden>
     <div class="caixa">

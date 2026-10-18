@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS candidatura (
   cv_usado TEXT,
   status TEXT NOT NULL,
   motivo TEXT,
-  data TEXT NOT NULL DEFAULT (date('now'))
+  data TEXT NOT NULL DEFAULT (date('now')),
+  descricao TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_cand_url ON candidatura(url);
 CREATE TABLE IF NOT EXISTS texto_gerado (

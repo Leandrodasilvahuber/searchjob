@@ -14,6 +14,13 @@ public class NavegadorFirefox {
     private WebDriver driver;
 
     public synchronized WebDriver driver() {
+        if (driver != null) {
+            try {
+                driver.getWindowHandle(); // sessão viva?
+            } catch (org.openqa.selenium.WebDriverException e) {
+                fechar(); // Firefox/geckodriver morreu (ou foi fechado): abre outro em vez de falhar todas as vagas seguintes
+            }
+        }
         if (driver == null) {
             try {
                 Path perfil = Path.of(System.getProperty("searchjob.firefox-profile", "data/firefox-profile")).toAbsolutePath();
@@ -24,7 +31,11 @@ public class NavegadorFirefox {
                 if (binario != null) o.setBinary(binario);
                 o.addArguments("-profile", perfil.toString());
                 if (Boolean.getBoolean("searchjob.headless")) o.addArguments("-headless");
-                driver = new FirefoxDriver(o);
+                o.setPageLoadTimeout(java.time.Duration.ofSeconds(60));
+                o.setScriptTimeout(java.time.Duration.ofSeconds(30));
+                // página em loop de JavaScript deixa o Firefox sem responder: sem este limite o Selenium espera 3 min por comando
+                var cliente = org.openqa.selenium.remote.http.ClientConfig.defaultConfig().readTimeout(java.time.Duration.ofSeconds(45));
+                driver = new FirefoxDriver(org.openqa.selenium.firefox.GeckoDriverService.createDefaultService(), o, cliente);
             } catch (Exception e) {
                 throw new IllegalStateException("Não foi possível abrir o Firefox: " + e.getMessage(), e);
             }
@@ -64,6 +75,8 @@ public class NavegadorFirefox {
         if (driver != null) {
             try {
                 driver.quit();
+            } catch (org.openqa.selenium.WebDriverException e) {
+                // já estava morto
             } finally {
                 driver = null;
             }

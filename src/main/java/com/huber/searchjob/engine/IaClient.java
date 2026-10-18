@@ -30,6 +30,18 @@ public class IaClient {
         return !kv.get(KvRepo.CONFIG, "openrouter_chave", "").isBlank();
     }
 
+    private final ThreadLocal<String> ultimoModelo = new ThreadLocal<>();
+
+    /** Modelo que respondeu a última chamada desta thread (vazio se nenhuma IA foi usada desde {@link #esquecerModelo()}). */
+    public String ultimoModelo() {
+        String m = ultimoModelo.get();
+        return m == null ? "" : m;
+    }
+
+    public void esquecerModelo() {
+        ultimoModelo.remove();
+    }
+
     /** Envia system + user e devolve o texto da resposta. */
     public String conversar(String system, String user) {
         if (java.time.Instant.now().isBefore(pausadaAte))
@@ -52,6 +64,7 @@ public class IaClient {
             if (m.isBlank()) continue;
             try {
                 String r = chamarModelo(m.trim(), system, user);
+                ultimoModelo.set(m.trim());
                 TesteFullLog.texto(m.trim(), user, r); // TEMP-TESTE-FULL
                 return r;
             } catch (IllegalStateException e) {

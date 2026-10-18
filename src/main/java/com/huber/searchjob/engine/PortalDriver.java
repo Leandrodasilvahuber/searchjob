@@ -35,6 +35,11 @@ public interface PortalDriver {
         return new String[] {null, null};
     }
 
+    /** Completa a vaga antes dos filtros (ex.: descrição que a busca não traz); devolve a própria vaga se não há o que buscar. */
+    default Vaga detalhar(Vaga v) {
+        return v;
+    }
+
     /** Libera recursos (navegador). */
     default void fechar() {}
 

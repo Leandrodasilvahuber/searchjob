@@ -44,6 +44,7 @@ final class Selects {
                 return new Desfecho(Status.PRECISA_USUARIO, "lista de seleção ilegível (opções: " + opcoes + ")");
             List<String> ordenadas = new ArrayList<>(opcoes);
             java.util.Collections.sort(ordenadas); // a ordem muda entre vagas; a pergunta salva tem que ser a mesma
+            if (Texto.perguntaEmIngles(pergunta)) return new Desfecho(Status.PULADA, "vaga em inglês: " + pergunta);
             String chave = pergunta + " [opções: " + String.join(" | ", ordenadas) + "]";
             var res = situacoes.resolver(portal, chave, contexto, cv, false, continuar);
             switch (res.tipo()) {

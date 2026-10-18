@@ -48,19 +48,17 @@ class SituacaoServiceTest extends BaseIT {
     }
 
     @Test
-    void iaResolveEUsuarioConfirmaVirandoRegra() throws Exception {
+    void iaResolveVirandoRegraSemPedirConfirmacao() throws Exception {
         when(ia.configurado()).thenReturn(true);
         when(ia.conversarJson(any(), any())).thenReturn(JSON.readTree("{\"resolvido\":true,\"resposta\":\"15 anos\"}"));
-        var futuro = CompletableFuture.supplyAsync(() -> service.resolver("Gupy", "Anos de experiência com Docker?", "", () -> true));
-        esperarStatus(SituacaoRepo.PENDENTE_CONFIRMACAO);
-        long id = repo.porStatus(SituacaoRepo.PENDENTE_CONFIRMACAO).get(0).id();
-        service.confirmar(id, "Mais de 8 anos");
-        Resultado r = futuro.get();
-        assertEquals(Tipo.CONFIRMADA_PELO_USUARIO, r.tipo());
-        assertEquals("Mais de 8 anos", r.resposta());
-        assertEquals("ia_confirmada", repo.porId(id).orElseThrow().origem());
-        // próxima vez: aplicada direto
-        assertEquals(Tipo.APLICADA, service.resolver("Gupy", "Anos de experiência com Docker?", "", () -> true).tipo());
+        Resultado r = service.resolver("Gupy", "Anos de experiência com Docker?", "", () -> true);
+        assertEquals(Tipo.APLICADA, r.tipo()); // sem esperar o usuário
+        assertEquals("15 anos", r.resposta());
+        assertEquals("ia", repo.porId(r.situacaoId()).orElseThrow().origem());
+        assertEquals(SituacaoRepo.ATIVA, repo.porId(r.situacaoId()).orElseThrow().status());
+        assertTrue(repo.porStatus(SituacaoRepo.PENDENTE_CONFIRMACAO).isEmpty());
+        // a vaga seguinte reaproveita a regra, sem nova chamada à IA
+        assertEquals("15 anos", service.resolver("Gupy", "Anos de experiência com Docker?", "", () -> true).resposta());
     }
 
     @Test
@@ -144,5 +142,21 @@ class SituacaoServiceTest extends BaseIT {
         assertFalse(dados.containsKey("CPF"));
         assertFalse(dados.containsKey("Nome da mãe"));
         assertTrue(dados.containsKey("Cidade/UF"));
+    }
+
+    @Test
+    void camposFatuaisNaoViramTextoDaIa() {
+        assertTrue(SituacaoService.fatual("3. Qual a sua expectativa salarial? *"));
+        assertTrue(SituacaoService.fatual("2. Qual a sua última / atual remuneração?"));
+        assertTrue(SituacaoService.fatual("Informe a matrícula de quem indicou"));
+        assertFalse(SituacaoService.fatual("Conte sobre sua experiência com filas"));
+    }
+
+    @Test
+    void campoOpcionalSemDadoFicaEmBranco() {
+        assertTrue(SituacaoService.opcional("4. Caso contrário, não é necessário o preenchimento deste campo."));
+        assertTrue(SituacaoService.opcional("Telefone (opcional)"));
+        assertTrue(SituacaoService.opcional("5. Caso você seja colaborador do GB, informe a sua matrícula."));
+        assertFalse(SituacaoService.opcional("Qual a sua cidade? *"));
     }
 }

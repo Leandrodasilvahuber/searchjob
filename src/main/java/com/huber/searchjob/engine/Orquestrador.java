@@ -79,11 +79,20 @@ public class Orquestrador {
 
     public synchronized Estado estado() {
         return new Estado(rodando, mensagem, processadas.get(), enviadas.get(), puladas.get(), erros.get(),
-                new ArrayList<>(log), chamado);
+                new ArrayList<>(log), chamadoAtual());
+    }
+
+    /** Chamado do login/CAPTCHA ou, se a vaga está parada numa pergunta sem resposta, a pendência dela. */
+    private Chamado chamadoAtual() {
+        Chamado c = chamado;
+        if (c != null) return c;
+        SituacaoService.Espera e = situacoes.esperando();
+        return e == null ? null : new Chamado("PENDENCIA", e.portal(), "", e.pergunta().replace(Checkboxes.MARCADOR, "") + " — responda em Pendências");
     }
 
     /** Decisão do usuário para o chamado aberto: "continuar" (já logou/resolveu) ou "pular". */
     public void decidir(String decisao) {
+        if (chamado == null && "pular".equals(decisao)) situacoes.pularEspera();
         if (chamado != null && ("continuar".equals(decisao) || "pular".equals(decisao))) decisoes.offer(decisao);
     }
 
@@ -248,13 +257,14 @@ public class Orquestrador {
             bloqueados.clear();
             candidaturas.urlsProcessadas(dryRun).forEach(u -> feitas.add(ChaveVaga.de(u)));
             for (PortalDriver driver : drivers) {
+                int novas = 0; // o limite de vagas novas vale por portal, somando todos os termos
                 for (String termo : kv.get(KvRepo.PREF, "termos", "").split(",")) {
-                    if (!rodando || termo.isBlank() || bloqueados.contains(driver.nome())) continue;
+                    if (!rodando || termo.isBlank() || bloqueados.contains(driver.nome()) || novas >= max) continue;
                     registrar(driver.nome() + ": buscando \"" + termo.trim() + "\"");
                     List<Vaga> vagas = null;
                     while (vagas == null) {
                         try {
-                            vagas = driver.buscar(termo.trim(), max);
+                            vagas = driver.buscar(termo.trim(), max + candidaturas.contarProcessadas(driver.nome(), dryRun)); // o limite vale para vagas novas
                         } catch (Exception e) {
                             registrar("erro na busca (" + driver.nome() + "): " + e.getMessage());
                             if (e.getMessage() == null || !(e.getMessage().contains("CAPTCHA") || e.getMessage().contains("LOGIN necessário"))) break;
@@ -276,6 +286,8 @@ public class Orquestrador {
                             jaFeitas++;
                             continue;
                         }
+                        if (novas >= max) break;
+                        novas++;
                         processar(driver, v, iaAvalia);
                         int maxEnvios = kv.inteiro(KvRepo.CONFIG, "max_envios", 0);
                         if (maxEnvios > 0 && enviadas.get() >= maxEnvios) {
@@ -293,7 +305,8 @@ public class Orquestrador {
             if (kv.booleano(KvRepo.CONFIG, "relatorio_desktop", false)) escreverEstatisticas(); // TEMP-TESTE-FULL
             if (rodando) aviso.fim(); // não toca se o usuário parou a sessão
         } catch (Exception e) {
-            registrar("sessão interrompida: " + e.getMessage());
+            // parar() interrompe a thread: o driver JDBC/Selenium reclama disso, mas não é falha
+            registrar(rodando ? "sessão interrompida: " + e.getMessage() : "sessão parada pelo usuário");
         } finally {
             drivers.forEach(PortalDriver::fechar);
             navegador.fechar();
@@ -322,18 +335,20 @@ public class Orquestrador {
     }
 
     private void pular(Vaga v, String rotulo, String motivo) {
-        candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", motivo);
+        candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), null, "pulada", motivo, v.descricao());
         puladas.incrementAndGet();
         aviso.pulada();
+        EventoJson.vaga(v, "pulada", motivo);
         registrar("pulada", "vaga pulada: " + rotulo + " (" + motivo + ")", null);
     }
 
-    private void processar(PortalDriver driver, Vaga v, boolean iaAvalia) {
+    private void processar(PortalDriver driver, Vaga vaga, boolean iaAvalia) {
         processadas.incrementAndGet();
+        Vaga v = driver.detalhar(vaga);
         String rotulo = v.empresa() + " — " + v.cargo();
         registrar("encontrada", "vaga encontrada: " + rotulo, null);
-        // modo IA: só a recência é decidida por código; stack, inglês, local e tipo de vaga ficam com a IA
-        Optional<String> descarte = iaAvalia ? filtro.motivoRecencia(v, LocalDate.now()) : filtro.motivoDescarte(v, LocalDate.now());
+        // modo IA: só recência e vaga em inglês são decididas por código; stack, local e tipo de vaga ficam com a IA
+        Optional<String> descarte = filtro.motivoIdioma(v).or(() -> iaAvalia ? filtro.motivoRecencia(v, LocalDate.now()) : filtro.motivoDescarte(v, LocalDate.now()));
         if (descarte.isPresent()) {
             pular(v, rotulo, descarte.get());
             return;
@@ -380,19 +395,32 @@ public class Orquestrador {
             rodando = false;
             return;
         }
-        long id = candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), cv.get().nome(), "pendente", "em andamento");
+        long id = candidaturas.gravar(v.portal(), v.empresa(), v.cargo(), v.url(), cv.get().nome(), "pendente", "em andamento", v.descricao());
         registrar("aberta", "vaga aberta: " + rotulo + " · CV " + cv.get().nome(), null);
         // uma tentativa por rodada: repetir depois de um clique em "enviar" poderia candidatar duas vezes
         PortalDriver.Desfecho d;
         boolean pulouChamado = false;
         int tentativasLogin = 0;
+        String ultimoMotivo = null;
+        int repetidos = 0;
+        boolean pulouPorRepeticao = false;
         while (true) {
             try {
                 d = driver.candidatar(v, cv.get(), kv.booleano(KvRepo.CONFIG, "dry_run", true), () -> rodando); // lê a cada tentativa: o checkbox vale na hora
             } catch (Exception e) {
                 d = new PortalDriver.Desfecho(PortalDriver.Status.ERRO, String.valueOf(e.getMessage()));
+                // Firefox travado/morto (timeout de comando): fecha para a próxima vaga abrir um navegador novo
+                if (e instanceof org.openqa.selenium.WebDriverException) driver.fechar();
             }
             if (d.status() != PortalDriver.Status.PRECISA_USUARIO || !rodando) break;
+            // a mesma pendência de novo e de novo (resposta que nunca é aceita): pula a vaga em vez de travar a sessão
+            repetidos = java.util.Objects.equals(d.motivo(), ultimoMotivo) ? repetidos + 1 : 0;
+            ultimoMotivo = d.motivo();
+            if (repetidos >= 1 && !pedeLogin(d.motivo())) {
+                pulouChamado = true;
+                pulouPorRepeticao = true;
+                break;
+            }
             // login pedido no meio da busca: entra sozinho com o login salvo (até 2 tentativas por vaga)
             boolean captchaNoLogin = false;
             if (pedeLogin(d.motivo()) && tentativasLogin < 2 && entrarAutomatico(driver)) {
@@ -429,10 +457,12 @@ public class Orquestrador {
                 candidaturas.atualizarStatus(id, "aguardando_usuario", d.motivo());
             } else {
                 candidaturas.atualizarStatus(id, "pulada",
-                        (kv.booleano(KvRepo.CONFIG, "nao_interagir", false) ? "pulada (não interagir): "
+                        (pulouPorRepeticao ? "pulada (pendência repetida): "
+                                : kv.booleano(KvRepo.CONFIG, "nao_interagir", false) ? "pulada (não interagir): "
                                 : "pulada pelo usuário: ") + d.motivo());
                 puladas.incrementAndGet();
                 aviso.pulada();
+                EventoJson.vaga(v, "pulada", d.motivo());
                 registrar("pulada", "vaga pulada: " + rotulo + " (" + d.motivo() + ")", null);
             }
             return;
@@ -446,11 +476,13 @@ public class Orquestrador {
                 candidaturas.atualizarStatus(id, "enviada", d.motivo());
                 enviadas.incrementAndGet();
                 aviso.enviada();
+                EventoJson.vaga(v, "cadastrado", d.motivo());
                 registrar("preenchida", "vaga preenchida: " + rotulo, null);
                 registrar("enviada", "vaga enviada com sucesso: " + rotulo, null);
             }
             case PRONTA_DRY_RUN -> {
                 candidaturas.atualizarStatus(id, "dry_run", d.motivo());
+                EventoJson.vaga(v, "cadastrado", "dry-run: " + d.motivo());
                 registrar("preenchida", "vaga preenchida (dry-run, não enviada): " + rotulo, null);
             }
             case PRECISA_USUARIO -> {
@@ -462,11 +494,13 @@ public class Orquestrador {
                 candidaturas.atualizarStatus(id, "pulada", d.motivo());
                 puladas.incrementAndGet();
                 aviso.pulada();
+                EventoJson.vaga(v, "pulada", d.motivo());
                 registrar("pulada", "vaga pulada: " + rotulo + " (" + d.motivo() + ")", null);
             }
             default -> {
                 candidaturas.atualizarStatus(id, "erro", d.motivo());
                 erros.incrementAndGet();
+                EventoJson.vaga(v, "erro", d.motivo());
                 registrar("erro", "erro ao enviar: " + rotulo, d.motivo());
             }
         }
@@ -482,6 +516,7 @@ public class Orquestrador {
             Você avalia se uma vaga combina com o candidato. Responda SOMENTE com JSON:
             {"candidatar": true|false, "cv": "nome exato de um dos CVs ou vazio", "motivo": "curto"}.
             Pule vagas que exigem inglês falado/reuniões em inglês, stack principal fora do perfil, estágio ou fora do Brasil.
+            Local e modalidade (remoto, híbrido ou presencial, em qualquer cidade do Brasil) NUNCA são motivo para pular: o candidato aceita todos.
             """;
 
     private String avaliaPedido(Vaga v) {
