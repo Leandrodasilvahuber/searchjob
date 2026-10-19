@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 /** Telas de edição: configuração, dados fixos, situações, pendências, CVs e histórico. */
 @Controller
 public class CadastrosController {
-    private static final List<String> SEGREDOS = List.of("openrouter_chave");
+    private static final List<String> SEGREDOS = List.of("openrouter_chave", "zai_chave");
 
     private final KvRepo kv;
     private final SituacaoRepo situacoes;

@@ -157,6 +157,8 @@ public class SituacaoService {
             JsonNode r;
             try {
                 r = ia.conversarJson(SYSTEM, montarPedido(pergunta, contextoVaga));
+            } catch (IaClient.IaIndisponivel e) {
+                throw e; // todas as IAs falharam: a vaga é pulada (Orquestrador)
             } catch (RuntimeException e) {
                 r = null;
             }
@@ -263,6 +265,8 @@ public class SituacaoService {
             if (texto.isBlank() || "null".equalsIgnoreCase(texto)) return null;
             textos.inserir(portal, pergunta, primeiraLinha(contextoVaga), cv == null ? "" : cv.nome(), texto);
             return new Resultado(Tipo.APLICADA, texto, id);
+        } catch (IaClient.IaIndisponivel e) {
+            throw e; // todas as IAs falharam: a vaga é pulada (Orquestrador)
         } catch (RuntimeException e) {
             return null; // IA fora do ar: cai no fluxo normal (resposta salva ou chamar o usuário)
         }

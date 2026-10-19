@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 @SpringBootTest
 class FiltroEscolhaTest extends BaseIT {
@@ -22,15 +23,16 @@ class FiltroEscolhaTest extends BaseIT {
     @Autowired CvRepo cvs;
     @Autowired MdImporter importer;
     @Autowired KvRepo kv;
+    @Autowired JdbcClient jdbc;
 
     @BeforeEach
     void prepara() throws Exception {
         importer.importar(Path.of("/nao/existe")); // só sementes de preferências
-        if (cvs.todos().isEmpty()) {
-            cvs.salvar("Leandro_Huber_CV_NodeJS", "", "", "node,typescript,express,react");
-            cvs.salvar("Leandro_Huber_CV_PHP_Laravel", "", "", "php,laravel,vue");
-            cvs.salvar("Leandro_Huber_CV_Sistemas_Distribuidos", "", "", "kafka,microsservi,java,spring");
-        }
+        // o banco de teste é compartilhado entre as classes: outras deixam CVs com outros nomes
+        jdbc.sql("DELETE FROM cv").update();
+        cvs.salvar("Leandro_Huber_CV_NodeJS", "", "", "node,typescript,express,react");
+        cvs.salvar("Leandro_Huber_CV_PHP_Laravel", "", "", "php,laravel,vue");
+        cvs.salvar("Leandro_Huber_CV_Sistemas_Distribuidos", "", "", "kafka,microsservi,java,spring");
     }
 
     private Vaga vaga(String cargo, String desc, LocalDate pub) {
@@ -45,15 +47,6 @@ class FiltroEscolhaTest extends BaseIT {
     }
 
     @Test
-    void descartaRecenciaEstagioEInglesOral() {
-        LocalDate hoje = LocalDate.of(2026, 10, 16);
-        assertTrue(filtro.motivoDescarte(vaga("Dev PHP", "", hoje.minusDays(30)), hoje).isPresent());
-        assertTrue(filtro.motivoDescarte(vaga("Estagiário de TI", "", hoje), hoje).isPresent());
-        assertTrue(filtro.motivoDescarte(vaga("Dev Node", "Reuniões em inglês diárias", hoje), hoje).isPresent());
-        assertTrue(filtro.motivoDescarte(vaga("Dev Node", "inglês técnico para documentação", hoje), hoje).isEmpty());
-    }
-
-    @Test
     void escolheCvPelaStack() {
         LocalDate hoje = LocalDate.now();
         assertEquals("Leandro_Huber_CV_PHP_Laravel", escolha.escolher(vaga("Dev Laravel", "php vue", hoje)).orElseThrow().nome());
@@ -64,29 +57,16 @@ class FiltroEscolhaTest extends BaseIT {
     @Test
     void javaNaoCasaComJavascript() {
         LocalDate hoje = LocalDate.now();
-        var e = escolha.escolherDefinido(vaga("Dev", "experiência sólida em javascript", hoje)).orElseThrow();
-        assertFalse(e.definida()); // nenhuma stack clara: nada de mandar o CV de Java por engano
-        assertEquals("Leandro_Huber_CV_NodeJS", e.cv().nome());
+        // nenhuma stack clara: nada de mandar o CV de Java por engano
+        assertEquals("Leandro_Huber_CV_NodeJS", escolha.escolher(vaga("Dev", "experiência sólida em javascript", hoje)).orElseThrow().nome());
     }
 
     @Test
-    void kubernetesNaoViraStackProibida() {
-        LocalDate hoje = LocalDate.of(2026, 10, 16);
-        assertTrue(filtro.motivoDescarte(vaga("Engenheiro Kubernetes", "node", hoje), hoje).isEmpty());
-        assertTrue(filtro.motivoDescarte(vaga("Dev .NET Sênior", "", hoje), hoje).isPresent());
-    }
-
-    @Test
-    void sinalizaQuandoNaoHaDefinicaoEPriorizaLideranca() {
+    void priorizaLideranca() {
         LocalDate hoje = LocalDate.now();
-        var indefinida = escolha.escolherDefinido(vaga("Dev", "nada conhecido", hoje)).orElseThrow();
-        assertFalse(indefinida.definida());
-        var clara = escolha.escolherDefinido(vaga("Dev Laravel", "php vue", hoje)).orElseThrow();
-        assertTrue(clara.definida());
-        var arq = escolha.escolherDefinido(vaga("Arquiteto de Software Sênior", "php laravel", hoje)).orElseThrow();
-        assertTrue(arq.definida());
-        assertEquals("Leandro_Huber_CV_Sistemas_Distribuidos", arq.cv().nome());
         assertEquals("Leandro_Huber_CV_Sistemas_Distribuidos",
-                escolha.escolherDefinido(vaga("Tech Lead Node", "typescript", hoje)).orElseThrow().cv().nome());
+                escolha.escolher(vaga("Arquiteto de Software Sênior", "php laravel", hoje)).orElseThrow().nome());
+        assertEquals("Leandro_Huber_CV_Sistemas_Distribuidos",
+                escolha.escolher(vaga("Tech Lead Node", "typescript", hoje)).orElseThrow().nome());
     }
 }

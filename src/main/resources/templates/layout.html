@@ -4,28 +4,41 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title th:text="${titulo} + ' · SearchJob'">SearchJob</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>
-    :root { --bg:#f6f7f9; --card:#fff; --fg:#1b1f24; --mut:#667085; --bd:#d9dde3; --ac:#2563eb; --ok:#15803d; --warn:#b45309; --bad:#b91c1c; }
-    @media (prefers-color-scheme: dark) { :root { --bg:#111418; --card:#1a1f26; --fg:#e6e8eb; --mut:#98a2b3; --bd:#2d343d; --ac:#6ea0ff; --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; } }
+    :root { --bg:#f6f4fd; --card:#fff; --fg:#2a2740; --mut:#7a7894; --bd:#e6e2f3; --ac:#7c6cf2; --ok:#1f9d6a; --warn:#d9821c; --bad:#e5484d;
+            --sombra:0 2px 12px rgb(92 76 180 / .08); --r:16px; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#15141d; --card:#1e1c2a; --fg:#ebe9f5; --mut:#a3a0bd; --bd:#302d42; --ac:#a598ff; --ok:#4ade9a; --warn:#fbbf24; --bad:#ff7b7f;
+            --sombra:0 2px 14px rgb(0 0 0 / .35); } }
     * { box-sizing: border-box; }
-    body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, sans-serif; }
-    nav { display:flex; flex-wrap:wrap; align-items:center; gap:4px; padding:10px 16px; background:var(--card); border-bottom:1px solid var(--bd); position:sticky; top:0; }
-    nav a { color:var(--mut); text-decoration:none; padding:6px 12px; border-radius:6px; }
-    nav a.on { background:var(--ac); color:#fff; }
+    body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 "Nunito", ui-rounded, system-ui, sans-serif; }
+    nav { display:flex; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; align-items:center; gap:2px; padding:8px 16px; background:color-mix(in srgb, var(--card) 88%, transparent);
+          backdrop-filter:blur(8px); border-bottom:1px solid var(--bd); position:sticky; top:0; z-index:10; }
+    nav .marca { font-weight:800; font-size:17px; margin-right:6px; color:var(--ac); white-space:nowrap; }
+    nav a, nav .marca, nav form { flex:none; }
+    nav a { color:var(--mut); text-decoration:none; padding:5px 10px; font-size:14px; white-space:nowrap; border-radius:999px; font-weight:600; transition:background .15s, color .15s; }
+    nav a:hover { background:color-mix(in srgb, var(--ac) 10%, transparent); color:var(--fg); }
+    nav a.on { background:var(--ac); color:#fff; box-shadow:0 2px 8px color-mix(in srgb, var(--ac) 40%, transparent); }
+    nav .sair { padding:5px 9px; }
+    .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
     nav .badge { background:var(--bad); color:#fff; border-radius:10px; padding:0 7px; font-size:12px; margin-left:4px; }
     main { max-width:1100px; margin:0 auto; padding:16px; }
-    h1 { font-size:22px; margin:8px 0 16px; }
-    .card { background:var(--card); border:1px solid var(--bd); border-radius:10px; padding:14px; margin-bottom:14px; }
+    h1 { font-size:24px; font-weight:800; margin:8px 0 16px; }
+    a { color:var(--ac); }
+    .card { background:var(--card); border:1px solid var(--bd); border-radius:var(--r); padding:16px; margin-bottom:14px; box-shadow:var(--sombra); }
     table { width:100%; border-collapse:collapse; }
     th, td { text-align:left; padding:8px; border-bottom:1px solid var(--bd); vertical-align:top; word-break:break-word; }
-    th { color:var(--mut); font-weight:600; font-size:13px; }
-    input, textarea, select, button { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--bd); border-radius:6px; padding:6px 10px; }
+    th { color:var(--mut); font-weight:700; font-size:13px; }
+    input, textarea, select, button { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--bd); border-radius:10px; padding:6px 10px; }
+    input:focus, textarea:focus, select:focus { outline:2px solid color-mix(in srgb, var(--ac) 45%, transparent); outline-offset:1px; }
     textarea { width:100%; min-height:70px; } input[type=text], input[type=password] { width:100%; }
-    button { cursor:pointer; background:var(--ac); color:#fff; border-color:var(--ac); }
+    button { cursor:pointer; background:var(--ac); color:#fff; border-color:var(--ac); border-radius:999px; padding:6px 14px; font-weight:700; transition:transform .1s, filter .15s; }
+    button:hover { filter:brightness(1.07); } button:active { transform:scale(.97); }
     button.sec { background:transparent; color:var(--fg); border-color:var(--bd); }
     button.del { background:transparent; color:var(--bad); border-color:var(--bad); }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .tag { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; border:1px solid var(--bd); }
+    .tag { display:inline-block; padding:1px 10px; border-radius:999px; font-size:12px; font-weight:700; border:1px solid var(--bd); }
     .enviada,.ativa { color:var(--ok); } .pulada,.inativa { color:var(--mut); } .erro { color:var(--bad); }
     .pendente,.dry_run,.pendente_confirmacao,.aguardando_usuario { color:var(--warn); }
     .mut { color:var(--mut); } pre { white-space:pre-wrap; font-size:13px; max-height:220px; overflow:auto; }
@@ -74,24 +87,25 @@
     details.item > summary { grid-template-columns:1fr; }
     .resp { grid-column:1; } .lado { grid-column:1; grid-row:auto; text-align:left; }
   }
-    .chamando { border-color:var(--warn); background:color-mix(in srgb, var(--warn) 12%, var(--card)); }
+    .chamando { border-color:var(--warn); border-radius:var(--r); background:color-mix(in srgb, var(--warn) 12%, var(--card)); }
   </style>
 </head>
 <body>
 <nav th:fragment="menu(pagina)">
-  <a th:href="@{/}" th:classappend="${pagina=='painel'} ? 'on'">Painel</a>
-  <a th:href="@{/pendencias}" th:classappend="${pagina=='pendencias'} ? 'on'">Pendências</a>
-  <a th:href="@{/historico}" th:classappend="${pagina=='historico'} ? 'on'">Histórico</a>
-  <a th:href="@{/situacoes}" th:classappend="${pagina=='situacoes'} ? 'on'">Situações</a>
-  <a th:href="@{/textos}" th:classappend="${pagina=='textos'} ? 'on'">Textos da IA</a>
-  <a th:href="@{/cvs}" th:classappend="${pagina=='cvs'} ? 'on'">CVs</a>
-  <a th:href="@{/credenciais}" th:classappend="${pagina=='credenciais'} ? 'on'">Credenciais</a>
-  <a th:href="@{/kv/dado_fixo}" th:classappend="${pagina=='dado_fixo'} ? 'on'">Dados fixos</a>
-  <a th:href="@{/kv/preferencia}" th:classappend="${pagina=='preferencia'} ? 'on'">Preferências</a>
-  <a th:href="@{/kv/config}" th:classappend="${pagina=='config'} ? 'on'">Configuração</a>
-  <form th:action="@{/encerrar}" method="post" style="margin-left:auto"
+  <span class="marca">📄 SearchJob</span>
+  <a th:href="@{/}" th:classappend="${pagina=='painel'} ? 'on'">🏠 Painel</a>
+  <a th:href="@{/pendencias}" th:classappend="${pagina=='pendencias'} ? 'on'">🔔 Pendências</a>
+  <a th:href="@{/historico}" th:classappend="${pagina=='historico'} ? 'on'">📜 Histórico</a>
+  <a th:href="@{/situacoes}" th:classappend="${pagina=='situacoes'} ? 'on'">🧩 Situações</a>
+  <a th:href="@{/textos}" th:classappend="${pagina=='textos'} ? 'on'">✨ Textos da IA</a>
+  <a th:href="@{/cvs}" th:classappend="${pagina=='cvs'} ? 'on'">📄 CVs</a>
+  <a th:href="@{/credenciais}" th:classappend="${pagina=='credenciais'} ? 'on'">🔑 Credenciais</a>
+  <a th:href="@{/kv/dado_fixo}" th:classappend="${pagina=='dado_fixo'} ? 'on'">📌 Dados fixos</a>
+  <a th:href="@{/kv/preferencia}" th:classappend="${pagina=='preferencia'} ? 'on'">💜 Preferências</a>
+  <a th:href="@{/kv/config}" th:classappend="${pagina=='config'} ? 'on'">⚙️ Configuração</a>
+  <form th:action="@{/encerrar}" method="post" style="margin-left:auto; padding-left:6px"
         onsubmit="return confirm('Encerrar o SearchJob? A sessão em andamento será parada, o Firefox do robô fechado e o serviço sairá da memória.')">
-    <button class="del" title="Para a sessão, fecha o Firefox do robô e derruba o serviço">⏻ Encerrar serviço</button>
+    <button class="del sair" title="Encerrar serviço: para a sessão, fecha o Firefox do robô e derruba o serviço">🔌<span class="sr">Encerrar serviço</span></button>
   </form>
 </nav>
 </body>

@@ -44,7 +44,8 @@ public final class Texto {
 
     /** Igual a {@link #emIngles(String)}, com mínimo próprio de palavras inglesas (formulários são curtos). */
     public static boolean emIngles(String texto, int minimo) {
-        long en = 0, pt = 0;
+        long en = 0;
+        long pt = 0;
         for (String t : normalizar(texto).split(" ")) {
             if (PALAVRAS_EN.contains(t)) en++;
             if (PALAVRAS_PT.contains(t)) pt++;
@@ -62,7 +63,8 @@ public final class Texto {
 
     /** Pergunta de formulário (curta) em inglês: 2+ palavras inglesas e mais inglesas que portuguesas; "LinkedIn Profile" não conta. */
     public static boolean perguntaEmIngles(String pergunta) {
-        long en = 0, pt = 0;
+        long en = 0;
+        long pt = 0;
         for (String t : normalizar(pergunta).split(" ")) {
             if (PERGUNTA_EN.contains(t)) en++;
             if (PERGUNTA_PT.contains(t)) pt++;

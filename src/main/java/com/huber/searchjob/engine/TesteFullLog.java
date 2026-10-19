@@ -29,7 +29,11 @@ final class TesteFullLog {
     }
 
     /** Ligado pelo checkbox "Gerar relatório na Área de Trabalho" do painel (config relatorio_desktop). */
-    static volatile boolean ativo;
+    private static volatile boolean ativo;
+
+    static void ativar(boolean ligado) {
+        ativo = ligado;
+    }
 
     private static void anexar(Path arq, String s) {
         if (!ativo) return;

@@ -17,16 +17,10 @@ public class EscolhaCv {
         this.cvs = cvs;
     }
 
-    /** cv escolhido e se a escolha foi clara (false = nenhuma palavra-chave bateu ou houve empate entre stacks). */
-    public record Escolha(Cv cv, boolean definida) {}
-
     private static final String[] LIDERANCA = {"arquiteto", "arquiteta", "lider", "lideranca", "tech lead", "staff", "principal", "coordenador", "coordenadora"};
 
+    /** CV inicial pelas regras; a IA pode trocar na avaliação da vaga. */
     public Optional<Cv> escolher(Vaga v) {
-        return escolherDefinido(v).map(Escolha::cv);
-    }
-
-    public Optional<Escolha> escolherDefinido(Vaga v) {
         List<Cv> todos = cvs.todos();
         if (todos.isEmpty()) return Optional.empty();
         String titulo = Texto.normalizar(v.cargo());
@@ -37,7 +31,7 @@ public class EscolhaCv {
         // arquiteto/líder/staff: vai para o CV de sistemas distribuídos, que é o de perfil sênior/liderança
         if (lideranca) {
             Optional<Cv> dist = todos.stream().filter(c -> c.nome().toLowerCase().contains("distribu")).findFirst();
-            if (dist.isPresent()) return Optional.of(new Escolha(dist.get(), true));
+            if (dist.isPresent()) return dist;
         }
         int max = 0;
         List<Cv> topo = new ArrayList<>();
@@ -49,10 +43,10 @@ public class EscolhaCv {
             }
             if (pontos == max && pontos > 0) topo.add(cv);
         }
-        if (topo.isEmpty()) return Optional.of(new Escolha(padrao, false));
-        if (topo.size() == 1) return Optional.of(new Escolha(topo.get(0), true));
-        // empate: NodeJS se estiver entre os empatados, mas sem certeza
-        return Optional.of(new Escolha(topo.contains(padrao) ? padrao : topo.get(0), false));
+        if (topo.isEmpty()) return Optional.of(padrao);
+        if (topo.size() == 1) return Optional.of(topo.get(0));
+        // empate: NodeJS se estiver entre os empatados
+        return Optional.of(topo.contains(padrao) ? padrao : topo.get(0));
     }
 
     /**

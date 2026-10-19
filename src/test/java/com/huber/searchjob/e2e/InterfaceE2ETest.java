@@ -92,11 +92,11 @@ class InterfaceE2ETest extends BaseIT {
     }
 
     @Test
-    void configuracaoModoDryRunEChaveSecreta() throws Exception {
-        http.post("/modo", Map.of("modo", "ia"));
-        assertEquals("ia", kv.get(KvRepo.CONFIG, "modo", ""));
-        http.post("/modo", Map.of("modo", "codigo"));
-        assertEquals("codigo", kv.get(KvRepo.CONFIG, "modo", ""));
+    void configuracaoFallbackDryRunEChaveSecreta() throws Exception {
+        http.post("/fallback/zai", Map.of("ligado", "false"));
+        assertEquals("false", kv.get(KvRepo.CONFIG, "fallback_zai", ""));
+        http.post("/fallback/zai", Map.of("ligado", "true"));
+        assertEquals("true", kv.get(KvRepo.CONFIG, "fallback_zai", ""));
         http.post("/dryrun", Map.of("ligado", "false"));
         assertEquals("false", kv.get(KvRepo.CONFIG, "dry_run", ""));
         http.post("/dryrun", Map.of("ligado", "true"));

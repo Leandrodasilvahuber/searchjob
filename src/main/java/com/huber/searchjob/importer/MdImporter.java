@@ -101,12 +101,17 @@ public class MdImporter {
         padrao(KvRepo.PREF, "stack_proibida", "java-only,.net,csharp,golang,python,kotlin,angular,nestjs obrigatorio,react native");
         padrao(KvRepo.PREF, "excluir_titulos", "estagio,estagiario,estagiaria,jovem aprendiz,banco de talentos,junior,jr");
         padrao(KvRepo.PREF, "exige_ingles_oral", "calls em ingles,reunioes em ingles,entrevista em ingles,fluencia oral,conversacao em ingles,ingles conversacional,spoken english,english speaking");
-        padrao(KvRepo.CONFIG, "modo", "codigo");
         padrao(KvRepo.CONFIG, "portais", "gupy,linkedin,indeed,catho,programathor");
         padrao(KvRepo.CONFIG, "dry_run", "true");
         padrao(KvRepo.CONFIG, "openrouter_url", "https://openrouter.ai/api/v1/chat/completions");
         padrao(KvRepo.CONFIG, "openrouter_modelos", "openai/gpt-oss-20b,mistralai/mistral-nemo,qwen/qwen3.7-flash,nvidia/nemotron-3-super-120b-a12b:free");
         padrao(KvRepo.CONFIG, "openrouter_chave", "");
+        padrao(KvRepo.CONFIG, "openrouter_intervalo_ms", "3500"); // free: 20 req/min
+        padrao(KvRepo.CONFIG, "zai_url", "https://api.z.ai/api/paas/v4/chat/completions");
+        padrao(KvRepo.CONFIG, "zai_modelos", "glm-4.5-flash");
+        chaveDoOpenclaude("zai_chave", "zai.env");
+        padrao(KvRepo.CONFIG, "zai_intervalo_ms", "2000"); // free: limite de chamadas simultâneas
+        padrao(KvRepo.CONFIG, "fallback_zai", "true");
         padrao(KvRepo.CONFIG, "max_vagas", "30");
         padrao(KvRepo.CONFIG, "nao_interagir", "false");
         padrao(KvRepo.CONFIG, "relatorio_desktop", "false");
@@ -114,6 +119,21 @@ public class MdImporter {
 
     private void padrao(String tabela, String chave, String valor) {
         if (kv.get(tabela, chave, null) == null) kv.put(tabela, chave, valor);
+    }
+
+    /** Chave vazia na config é preenchida com o OPENAI_API_KEY do .env do openclaude (~/.config/openclaude). */
+    private void chaveDoOpenclaude(String chave, String arquivo) {
+        if (!kv.get(KvRepo.CONFIG, chave, "").isBlank()) return;
+        Path env = Path.of(System.getProperty("user.home"), ".config", "openclaude", arquivo);
+        String valor = "";
+        try {
+            if (Files.isReadable(env))
+                valor = Files.readAllLines(env).stream().filter(l -> l.startsWith("OPENAI_API_KEY="))
+                        .map(l -> l.substring("OPENAI_API_KEY=".length()).replace("\"", "").trim()).findFirst().orElse("");
+        } catch (IOException e) {
+            log.warn("não li {}: {}", env, e.getMessage());
+        }
+        kv.put(KvRepo.CONFIG, chave, valor);
     }
 
     private int importarCvs(Path pasta) throws IOException {

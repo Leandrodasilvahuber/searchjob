@@ -40,6 +40,10 @@ public class Orquestrador {
 
     private static final long BIP_A_CADA_MS = 10_000;
     private volatile Chamado chamado;
+    /** Motivo de a sessão ter parado sozinha (o painel mostra num alert); vazio se não houve. */
+    private volatile String alerta = "";
+    /** A IA já caiu de vez nesta sessão (o alerta só abre na primeira vez). */
+    private volatile boolean iaJaFalhou;
     private final LinkedBlockingQueue<String> decisoes = new LinkedBlockingQueue<>();
 
     private volatile boolean rodando;
@@ -72,14 +76,14 @@ public class Orquestrador {
     }
 
     public record Estado(boolean rodando, String mensagem, int processadas, int enviadas, int puladas, int erros,
-                         List<Evento> log, Chamado chamado) {}
+                         List<Evento> log, Chamado chamado, String alerta) {}
 
     /** Linha do log: tipo = info|encontrada|aberta|preenchida|enviada|aguardando|pulada|erro. */
     public record Evento(String hora, String tipo, String texto, String detalhe) {}
 
     public synchronized Estado estado() {
         return new Estado(rodando, mensagem, processadas.get(), enviadas.get(), puladas.get(), erros.get(),
-                new ArrayList<>(log), chamadoAtual());
+                new ArrayList<>(log), chamadoAtual(), alerta);
     }
 
     /** Chamado do login/CAPTCHA ou, se a vaga está parada numa pergunta sem resposta, a pendência dela. */
@@ -194,6 +198,8 @@ public class Orquestrador {
         enviadas.set(0);
         puladas.set(0);
         erros.set(0);
+        alerta = "";
+        iaJaFalhou = false;
         log.clear();
         thread = new Thread(this::executar, "searchjob-sessao");
         thread.setDaemon(true);
@@ -241,14 +247,9 @@ public class Orquestrador {
                 if (d.isPresent()) drivers.add(d.get());
                 else registrar("portal \"" + p.trim() + "\" ainda não é suportado — ignorado");
             }
-            boolean iaAvalia = "ia".equals(kv.get(KvRepo.CONFIG, "modo", "codigo"));
             boolean dryRun = Boolean.parseBoolean(kv.get(KvRepo.CONFIG, "dry_run", "true"));
             int max = kv.inteiro(KvRepo.CONFIG, "max_vagas", 30);
-            if (iaAvalia && !ia.configurado()) {
-                registrar("modo IA sem chave configurada — voltando ao modo código");
-                iaAvalia = false;
-            }
-            registrar("sessão iniciada · modo " + (iaAvalia ? "IA avalia" : "código") + (dryRun ? " · dry-run" : ""));
+            registrar("sessão iniciada" + (dryRun ? " · dry-run" : ""));
             encontradasTotal.set(0); // TEMP-TESTE-FULL
             jaNoHistorico.set(0); // TEMP-TESTE-FULL
             idInicial = candidaturas.listar("", "").stream().mapToLong(c -> c.id()).max().orElse(0); // TEMP-TESTE-FULL
@@ -288,7 +289,7 @@ public class Orquestrador {
                         }
                         if (novas >= max) break;
                         novas++;
-                        processar(driver, v, iaAvalia);
+                        processar(driver, v);
                         int maxEnvios = kv.inteiro(KvRepo.CONFIG, "max_envios", 0);
                         if (maxEnvios > 0 && enviadas.get() >= maxEnvios) {
                             registrar("limite de " + maxEnvios + " envio(s) atingido — encerrando a sessão");
@@ -316,7 +317,7 @@ public class Orquestrador {
 
     /** TEMP-TESTE-FULL: resumo da sessão por portal e status, com os motivos de pulada/erro. */
     private void escreverEstatisticas() {
-        TesteFullLog.ativo = true; // só chega aqui com o checkbox marcado
+        TesteFullLog.ativar(true); // só chega aqui com o checkbox marcado
         var novas = candidaturas.listar("", "").stream().filter(c -> c.id() > idInicial).toList();
         StringBuilder sb = new StringBuilder();
         sb.append("Vagas encontradas nas buscas: ").append(encontradasTotal.get()).append('\n')
@@ -342,53 +343,28 @@ public class Orquestrador {
         registrar("pulada", "vaga pulada: " + rotulo + " (" + motivo + ")", null);
     }
 
-    private void processar(PortalDriver driver, Vaga vaga, boolean iaAvalia) {
+    private void processar(PortalDriver driver, Vaga vaga) {
         processadas.incrementAndGet();
         Vaga v = driver.detalhar(vaga);
         String rotulo = v.empresa() + " — " + v.cargo();
         registrar("encontrada", "vaga encontrada: " + rotulo, null);
-        // modo IA: só recência e vaga em inglês são decididas por código; stack, local e tipo de vaga ficam com a IA
-        Optional<String> descarte = filtro.motivoIdioma(v).or(() -> iaAvalia ? filtro.motivoRecencia(v, LocalDate.now()) : filtro.motivoDescarte(v, LocalDate.now()));
+        // só recência e vaga em inglês são decididas por código; stack, local e tipo de vaga ficam com a IA
+        Optional<String> descarte = filtro.motivoIdioma(v).or(() -> filtro.motivoRecencia(v, LocalDate.now()));
         if (descarte.isPresent()) {
             pular(v, rotulo, descarte.get());
             return;
         }
-        Optional<EscolhaCv.Escolha> escolha = escolhaCv.escolherDefinido(v);
-        Optional<Cv> cv = escolha.map(EscolhaCv.Escolha::cv);
-        // stack sem definição clara (nenhuma palavra-chave ou empate): pergunta à IA qual CV mandar
-        if (!iaAvalia && escolha.isPresent() && !escolha.get().definida() && ia.configurado()) {
-            try {
-                JsonNode r = ia.conversarJson(CV_SYSTEM, avaliaPedido(v));
-                String nomeCv = r.path("cv").asText("");
-                Optional<Cv> sugerido = cvs.todos().stream().filter(c -> c.nome().equalsIgnoreCase(nomeCv)).findFirst();
-                if (sugerido.isPresent()) {
-                    cv = sugerido;
-                    registrar("CV indefinido pelas regras — IA escolheu " + nomeCv);
-                }
-            } catch (RuntimeException e) {
-                registrar("IA indisponível para escolher CV, usando o padrão: " + e.getMessage());
-            }
+        Optional<Cv> cv = escolhaCv.escolher(v);
+        JsonNode r = avaliar(v, rotulo);
+        if (r == null) return; // a vaga não é gravada: entra de novo na próxima sessão
+        if (!r.path("candidatar").asBoolean(false)) {
+            pular(v, rotulo, "IA: " + r.path("motivo").asText("fora do perfil"));
+            return;
         }
-        if (iaAvalia) {
-            try {
-                JsonNode r = ia.conversarJson(AVALIA_SYSTEM, avaliaPedido(v));
-                if (!r.path("candidatar").asBoolean(false)) {
-                    pular(v, rotulo, "IA: " + r.path("motivo").asText("fora do perfil"));
-                    return;
-                }
-                String nomeCv = r.path("cv").asText("");
-                if (!nomeCv.isBlank()) {
-                    Optional<Cv> atual = cv;
-                    cv = cvs.todos().stream().filter(c -> c.nome().equalsIgnoreCase(nomeCv)).findFirst().or(() -> atual);
-                }
-            } catch (RuntimeException e) {
-                registrar("IA indisponível na avaliação, seguindo pelas regras: " + e.getMessage());
-                Optional<String> regras = filtro.motivoDescarte(v, LocalDate.now());
-                if (regras.isPresent()) {
-                    pular(v, rotulo, regras.get());
-                    return;
-                }
-            }
+        String nomeCv = r.path("cv").asText("");
+        if (!nomeCv.isBlank()) {
+            Optional<Cv> atual = cv;
+            cv = cvs.todos().stream().filter(c -> c.nome().equalsIgnoreCase(nomeCv)).findFirst().or(() -> atual);
         }
         if (cv.isEmpty()) {
             registrar("sem CV cadastrado — pare e importe os CVs");
@@ -407,6 +383,9 @@ public class Orquestrador {
         while (true) {
             try {
                 d = driver.candidatar(v, cv.get(), kv.booleano(KvRepo.CONFIG, "dry_run", true), () -> rodando); // lê a cada tentativa: o checkbox vale na hora
+            } catch (IaClient.IaIndisponivel e) {
+                iaFalhou(rotulo, e);
+                d = new PortalDriver.Desfecho(PortalDriver.Status.PULADA, "IA indisponível");
             } catch (Exception e) {
                 d = new PortalDriver.Desfecho(PortalDriver.Status.ERRO, String.valueOf(e.getMessage()));
                 // Firefox travado/morto (timeout de comando): fecha para a próxima vaga abrir um navegador novo
@@ -506,11 +485,39 @@ public class Orquestrador {
         }
     }
 
-    private static final String CV_SYSTEM = """
-            Escolha qual currículo enviar para a vaga. Responda SOMENTE com JSON: {"cv": "nome exato de um dos CVs"}.
-            Considere o nível (pleno, sênior, arquiteto, líder) e a stack da vaga. Arquiteto/líder/staff/plataforma/microsserviços
-            => o CV de sistemas distribuídos; PHP/Laravel/Vue => o CV PHP; Node/TypeScript/full stack JS => o CV NodeJS.
-            """;
+    /**
+     * Pede à IA a avaliação da vaga (as tentativas e o fallback ficam no IaClient). Sem resposta, pula a vaga sem gravá-la
+     * e devolve null; a sessão segue para a próxima.
+     */
+    private JsonNode avaliar(Vaga v, String rotulo) {
+        try {
+            return ia.conversarJson(AVALIA_SYSTEM, avaliaPedido(v));
+        } catch (RuntimeException e) {
+            if (!rodando) return null; // parado pelo usuário
+            iaFalhou(rotulo, e);
+            puladas.incrementAndGet();
+            registrar("pulada", "vaga pulada: " + rotulo + " (IA indisponível)", e.getMessage());
+            return null;
+        }
+    }
+
+    /** Todas as IAs falharam: na primeira vez da sessão abre o alerta no painel e bipa; depois só registra no log. */
+    private void iaFalhou(String rotulo, RuntimeException e) {
+        if (!rodando || iaJaFalhou) return;
+        iaJaFalhou = true;
+        alerta = "A IA não respondeu (OpenRouter e Z.ai falharam) na vaga " + rotulo
+                + ". A vaga foi pulada e a busca segue; se continuar falhando, confira as chaves em Config.";
+        registrar("erro", "IA indisponível", e.getMessage());
+        aviso.chamarUsuario();
+    }
+
+    private static void dormir(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
 
     private static final String AVALIA_SYSTEM = """
             Você avalia se uma vaga combina com o candidato. Responda SOMENTE com JSON:

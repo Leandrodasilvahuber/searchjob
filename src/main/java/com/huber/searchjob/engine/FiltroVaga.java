@@ -2,12 +2,10 @@ package com.huber.searchjob.engine;
 
 import com.huber.searchjob.db.KvRepo;
 import java.time.LocalDate;
-import java.util.Arrays;
-import java.util.List;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 
-/** Filtros por código (sem LLM). Devolve o motivo do descarte, ou vazio se a vaga passa. */
+/** Descartes objetivos feitos antes da IA (data e idioma). Devolve o motivo, ou vazio se a vaga passa. */
 @Component
 public class FiltroVaga {
     private final KvRepo kv;
@@ -16,7 +14,7 @@ public class FiltroVaga {
         this.kv = kv;
     }
 
-    /** Único descarte objetivo (data); o restante é julgamento, que no modo IA fica com a IA. */
+    /** Stack, nível, local e inglês oral são julgamento: ficam com a IA. */
     public Optional<String> motivoRecencia(Vaga v, LocalDate hoje) {
         int dias = kv.inteiro(KvRepo.PREF, "recencia_dias", 14);
         if (v.publicada() != null && v.publicada().isBefore(hoje.minusDays(dias)))
@@ -24,57 +22,8 @@ public class FiltroVaga {
         return Optional.empty();
     }
 
-    /** Vaga escrita em inglês é sempre descartada, em qualquer modo. */
+    /** Vaga escrita em inglês é sempre descartada. */
     public Optional<String> motivoIdioma(Vaga v) {
         return Texto.emIngles(v.cargo() + " " + v.descricao()) ? Optional.of("vaga em inglês") : Optional.empty();
-    }
-
-    public Optional<String> motivoDescarte(Vaga v, LocalDate hoje) {
-        Optional<String> velha = motivoRecencia(v, hoje);
-        if (velha.isPresent()) return velha;
-
-        String titulo = normalizar(v.cargo());
-        for (String t : lista("excluir_titulos"))
-            if (Texto.contemPalavra(titulo, t)) return Optional.of("tipo de vaga excluído: " + t);
-
-        String tudo = normalizar(v.cargo() + " " + v.descricao());
-        for (String t : lista("exige_ingles_oral"))
-            if (Texto.contemPalavra(tudo, t)) return Optional.of("exige inglês oral: " + t);
-        for (String t : lista("stack_proibida"))
-            if (!t.isEmpty() && stackExclusiva(titulo, tudo, t)) return Optional.of("stack fora do perfil: " + t);
-
-        if (v.local() != null && Texto.normalizar(v.local()).matches(".*\\b(portugal|estados unidos|usa|canada|espanha)\\b.*"))
-            return Optional.of("vaga fora do Brasil");
-        return Optional.empty();
-    }
-
-    /**
-     * Termo simples: descarta se aparece no título (a descrição cita muita tecnologia de apoio).
-     * Termo "x-only" (normalizado "x only"): descarta se x está no título e nem o título nem a descrição citam alguma stack aceita
-     * (preferência stack_aceita; padrão node, php, laravel, react, vue, typescript).
-     */
-    private boolean stackExclusiva(String titulo, String tudo, String termo) {
-        // os termos chegam normalizados ("java-only" vira "java only")
-        if (!termo.endsWith(" only")) return Texto.contemPalavra(titulo, termo);
-        String base = termo.substring(0, termo.length() - " only".length());
-        if (!Texto.contemPalavra(titulo, base)) return false;
-        for (String aceita : listaOu("stack_aceita", "node,php,laravel,react,vue,typescript"))
-            if (Texto.contemPalavra(tudo, aceita)) return false;
-        return true;
-    }
-
-    /** "C#" vira "csharp" e ".NET" vira "dotnet" (a normalização apagaria o "#" e o ponto, sobrando "c" e "net" soltos). */
-    private static String normalizar(String s) {
-        return Texto.normalizar(s == null ? "" : s.replaceAll("(?i)c#", "csharp").replaceAll("(?i)\\.net\\b", " dotnet"));
-    }
-
-    private List<String> listaOu(String chave, String padrao) {
-        return Arrays.stream(kv.get(KvRepo.PREF, chave, padrao).split(","))
-                .map(FiltroVaga::normalizar).filter(s -> !s.isEmpty()).toList();
-    }
-
-    private List<String> lista(String chave) {
-        return Arrays.stream(kv.get(KvRepo.PREF, chave, "").split(","))
-                .map(FiltroVaga::normalizar).filter(s -> !s.isEmpty()).toList();
     }
 }

@@ -4,6 +4,7 @@ import com.huber.searchjob.db.CandidaturaRepo;
 import com.huber.searchjob.db.KvRepo;
 import com.huber.searchjob.db.SituacaoRepo;
 import com.huber.searchjob.engine.Encerramento;
+import com.huber.searchjob.engine.IaClient;
 import com.huber.searchjob.engine.Orquestrador;
 import java.util.Map;
 import org.springframework.stereotype.Controller;
@@ -19,12 +20,14 @@ public class PainelController {
     private final KvRepo kv;
     private final SituacaoRepo situacoes;
     private final CandidaturaRepo candidaturas;
+    private final IaClient ia;
 
     private final Encerramento encerramento;
 
     public PainelController(Orquestrador orq, KvRepo kv, SituacaoRepo situacoes, CandidaturaRepo candidaturas,
-                            Encerramento encerramento) {
+                            IaClient ia, Encerramento encerramento) {
         this.encerramento = encerramento;
+        this.ia = ia;
         this.orq = orq;
         this.kv = kv;
         this.situacoes = situacoes;
@@ -34,7 +37,8 @@ public class PainelController {
     @GetMapping("/")
     public String painel(Model m) {
         m.addAttribute("estado", orq.estado());
-        m.addAttribute("modo", kv.get(KvRepo.CONFIG, "modo", "codigo"));
+        m.addAttribute("iaConfigurada", ia.configurado());
+        m.addAttribute("fallbackZai", kv.booleano(KvRepo.CONFIG, "fallback_zai", false));
         m.addAttribute("dryRun", Boolean.parseBoolean(kv.get(KvRepo.CONFIG, "dry_run", "true")));
         m.addAttribute("relatorio", kv.booleano(KvRepo.CONFIG, "relatorio_desktop", false));
         m.addAttribute("naoInteragir", kv.booleano(KvRepo.CONFIG, "nao_interagir", false));
@@ -49,8 +53,10 @@ public class PainelController {
         return Map.of("estado", orq.estado(), "pendencias", pendencias());
     }
 
+    /** Sem nenhuma IA configurada a busca não roda: o painel mostra o alerta. */
     @PostMapping("/iniciar")
     public String iniciar() {
+        if (!ia.configurado()) return "redirect:/?semIa";
         orq.iniciar();
         return "redirect:/";
     }
@@ -86,9 +92,10 @@ public class PainelController {
                 + "Para usar de novo, abra o SearchJob pelo atalho ou com <code>./run.sh</code>.</p></body>";
     }
 
-    @PostMapping("/modo")
-    public String modo(@RequestParam String modo) {
-        kv.put(KvRepo.CONFIG, "modo", "ia".equals(modo) ? "ia" : "codigo");
+    /** Liga/desliga a Z.ai como fallback da IA. */
+    @PostMapping("/fallback/zai")
+    public String fallbackZai(@RequestParam boolean ligado) {
+        kv.put(KvRepo.CONFIG, "fallback_zai", String.valueOf(ligado));
         return "redirect:/";
     }
 

@@ -4,7 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -18,6 +21,7 @@ import com.huber.searchjob.db.CvRepo;
 import com.huber.searchjob.db.KvRepo;
 import com.huber.searchjob.engine.Aviso;
 import com.huber.searchjob.engine.FabricaDrivers;
+import com.huber.searchjob.engine.IaClient;
 import com.huber.searchjob.engine.PortalDriver;
 import com.huber.searchjob.engine.Vaga;
 import com.huber.searchjob.importer.MdImporter;
@@ -47,6 +51,7 @@ class SessaoE2ETest extends BaseIT {
     @LocalServerPort int porta;
     @MockBean FabricaDrivers fabrica;
     @MockBean Aviso aviso;
+    @MockBean IaClient ia;
     @Autowired KvRepo kv;
     @Autowired CvRepo cvs;
     @Autowired CandidaturaRepo candidaturas;
@@ -113,12 +118,16 @@ class SessaoE2ETest extends BaseIT {
         cvs.salvar("CV_NodeJS", "", "texto node", "node,typescript");
         cvs.salvar("CV_PHP_Laravel", "", "texto php", "php,laravel,vue");
         kv.put(KvRepo.CONFIG, "portais", "fake");
-        kv.put(KvRepo.CONFIG, "modo", "codigo");
         kv.put(KvRepo.CONFIG, "dry_run", "false");
         kv.put(KvRepo.CONFIG, "max_vagas", "10");
+        kv.put(KvRepo.CONFIG, "ia_espera_tentativa_ms", "0");
         kv.put(KvRepo.PREF, "termos", "laravel");
         kv.put(KvRepo.PREF, "recencia_dias", "14");
         when(fabrica.criar(eq("fake"), any())).thenReturn(Optional.of(portal));
+        // IA de mentira: recusa estágio, aceita o resto e deixa o CV com as regras
+        when(ia.configurado()).thenReturn(true);
+        when(ia.conversarJson(anyString(), anyString())).thenAnswer(i -> JSON.readTree(
+                i.getArgument(1, String.class).contains("Estagiário") ? "{\"candidatar\":false,\"motivo\":\"estagiario\"}" : "{\"candidatar\":true}"));
         portal.desfechos.clear();
         portal.tentativas.clear();
         portal.cvPorUrl.clear();
@@ -287,6 +296,36 @@ class SessaoE2ETest extends BaseIT {
                 "Brasil", "remote", LocalDate.now(), "php"));
         rodar();
         assertTrue(portal.tentativas.isEmpty());
+    }
+
+    @Test
+    void semIaConfiguradaNaoIniciaEAvisa() throws Exception {
+        when(ia.configurado()).thenReturn(false);
+        portal.vagas = List.of(vaga("z", "Dev Laravel", "php laravel"));
+        var r = http.post("/iniciar", Map.of());
+        assertEquals(302, r.status());
+        Thread.sleep(500);
+        assertFalse(JSON.readTree(http.get("/api/estado").corpo()).path("estado").path("rodando").asBoolean());
+        assertTrue(portal.tentativas.isEmpty());
+    }
+
+    @Test
+    void iaIndisponivelPulaAVagaSegueEAvisaUmaVez() throws Exception {
+        when(ia.conversarJson(anyString(), anyString())).thenThrow(new IaClient.IaIndisponivel("HTTP 503", null));
+        portal.vagas = List.of(vaga("f1", "Dev Laravel", "php laravel"), vaga("f2", "Dev Vue", "vue"));
+        assertEquals(302, http.post("/iniciar", Map.of()).status());
+        JsonNode e = null;
+        for (int i = 0; i < 100; i++) {
+            Thread.sleep(200);
+            e = JSON.readTree(http.get("/api/estado").corpo()).path("estado");
+            if (!e.path("rodando").asBoolean() && e.path("log").toString().contains("terminei")) break;
+        }
+        verify(ia, times(2)).conversarJson(anyString(), anyString());
+        assertEquals(2, e.path("puladas").asInt(), "as duas vagas são puladas e a sessão segue até o fim");
+        assertTrue(e.path("alerta").asText().contains("Acme — Dev Laravel"), "o alerta é da primeira falha: " + e.path("alerta"));
+        assertEquals(1, e.path("log").toString().split("IA indisponível\\\",").length - 1, "um só aviso de erro");
+        assertTrue(portal.tentativas.isEmpty(), "sem IA nenhuma vaga é aberta");
+        assertTrue(candidaturas.listar("", "").isEmpty(), "a vaga não é gravada: entra de novo na próxima sessão");
     }
 
     @Test
