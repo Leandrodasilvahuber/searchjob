@@ -75,6 +75,29 @@ class SituacaoServiceTest extends BaseIT {
     }
 
     @Test
+    void respostaForaDasOpcoesViraPendenciaParaOUsuario() {
+        String chave = "Qual seu nível de inglês? [opções: Avançado | Básico | Intermediário]";
+        long errada = repo.inserir("Gupy", "pergunta", chave, Texto.hash(chave), "Fluente", "ia", SituacaoRepo.ATIVA, "");
+        long id = service.abrirPendencia("Gupy", "a resposta \"Fluente\" não corresponde a nenhuma opção de: " + chave, "Vaga X");
+        assertTrue(id > 0);
+        assertEquals(SituacaoRepo.AGUARDANDO_USUARIO, repo.porId(id).orElseThrow().status());
+        assertEquals(chave, repo.porId(id).orElseThrow().padraoPergunta());
+        assertEquals(SituacaoRepo.INATIVA, repo.porId(errada).orElseThrow().status()); // a regra que não casa sai de uso
+        assertFalse(service.pendenciaFechada(id));
+        // o chamado repetido reusa a mesma pendência
+        assertEquals(id, service.abrirPendencia("Gupy", "a resposta \"Fluente\" não corresponde a nenhuma opção de: " + chave, ""));
+        service.responder(id, "Básico");
+        assertTrue(service.pendenciaFechada(id));
+        assertEquals("Básico", service.resolver("Gupy", chave, "", () -> true).resposta());
+    }
+
+    @Test
+    void chamadoSemPerguntaRespondivelNaoAbrePendencia() {
+        assertEquals(0, service.abrirPendencia("Gupy", "dado sensível: Número do RG", ""));
+        assertEquals(0, service.abrirPendencia("Sólides", "Profiler pendente na Sólides: responda o teste comportamental", ""));
+    }
+
+    @Test
     void dadoSensivelNuncaVaiParaIa() {
         assertEquals(Tipo.SENSIVEL, service.resolver("Gupy", "Número do RG", "", () -> true).tipo());
         assertEquals(Tipo.SENSIVEL, service.resolver("Gupy", "Nome completo do pai", "", () -> true).tipo());

@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.huber.searchjob.db.IaProvedorRepo;
 import com.huber.searchjob.db.KvRepo;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
@@ -34,6 +35,9 @@ class IaClientFallbackTest {
     private final List<Long> horarios = new CopyOnWriteArrayList<>();
     private final List<String> corpos = new CopyOnWriteArrayList<>();
     private IaClient ia;
+    /** Rotas cujo 429 é o da cota diária do OpenRouter. */
+    private final java.util.Set<String> cota = new java.util.HashSet<>();
+    private IaProvedorRepo repo;
 
     @BeforeEach
     void sobe() throws Exception {
@@ -46,7 +50,8 @@ class IaClientFallbackTest {
                 List<Integer> r = roteiro.getOrDefault(rota, List.of(200));
                 int n = chamadas.get(rota).getAndIncrement();
                 int st = r.get(Math.min(n, r.size() - 1));
-                byte[] b = (st == 200 ? OK : "{\"erro\":1}").getBytes(StandardCharsets.UTF_8);
+                byte[] b = (st == 200 ? OK : st == 429 && cota.contains(rota)
+                        ? "{\"error\":{\"message\":\"Rate limit exceeded: free-models-per-day\"}}" : "{\"erro\":1}").getBytes(StandardCharsets.UTF_8);
                 if (st == 429) x.getResponseHeaders().add("Retry-After", "0");
                 x.sendResponseHeaders(st, b.length);
                 x.getResponseBody().write(b);
@@ -84,7 +89,19 @@ class IaClientFallbackTest {
                 cfg.getOrDefault(i.getArgument(1), String.valueOf((boolean) i.getArgument(2)))));
         when(kv.inteiro(anyString(), anyString(), anyInt())).thenAnswer(i -> Integer.parseInt(
                 cfg.getOrDefault(i.getArgument(1), String.valueOf((int) i.getArgument(2)))));
-        ia = new IaClient(kv);
+        repo = mock(IaProvedorRepo.class);
+        when(repo.todos()).thenAnswer(i -> List.of(provedor("openrouter", "OpenRouter", 0, true, 120, 10),
+                provedor("zai", "Z.ai", 1, Boolean.parseBoolean(cfg.get("fallback_zai")), 300, 1)));
+        ia = new IaClient(kv, repo, null);
+    }
+
+    /** Provedor montado das chaves prefixo_* do mapa, como ficavam na config antes da tabela ia_provedor. */
+    private IaProvedorRepo.Provedor provedor(String prefixo, String nome, int ordem, boolean ativo, int prazoS, int tentativas) {
+        return new IaProvedorRepo.Provedor(ordem + 1, nome, cfg.getOrDefault(prefixo + "_url", ""), cfg.getOrDefault(prefixo + "_chave", ""),
+                java.util.Arrays.stream(cfg.getOrDefault(prefixo + "_modelos", "").split(",")).filter(m -> !m.isBlank()).toList(),
+                ordem, ativo, Integer.parseInt(cfg.getOrDefault(prefixo + "_intervalo_ms", "3000")),
+                Integer.parseInt(cfg.getOrDefault(prefixo + "_timeout_s", String.valueOf(prazoS))),
+                Integer.parseInt(cfg.getOrDefault(prefixo + "_tentativas", String.valueOf(tentativas))));
     }
 
     @AfterEach
@@ -164,5 +181,41 @@ class IaClientFallbackTest {
         a.join();
         b.join();
         assertTrue(Math.abs(horarios.get(1) - horarios.get(0)) >= 180);
+    }
+
+    @Test
+    void promptDoModeloVaiJuntoNoSystem() {
+        com.huber.searchjob.db.IaPromptRepo prompts = mock(com.huber.searchjob.db.IaPromptRepo.class);
+        when(prompts.de("m1")).thenReturn("Pretensão: um valor só");
+        when(prompts.de("glm-4.5-flash")).thenReturn("");
+        ia = new IaClient(mock(KvRepo.class), repo, prompts);
+        ia.conversar("sys", "u");
+        assertTrue(corpos.get(0).contains("sys\\n\\nINSTRUÇÕES EXTRAS PARA ESTE MODELO") && corpos.get(0).contains("Pretensão: um valor só"),
+                corpos.get(0));
+        roteiro.put("/or", List.of(500));
+        cfg.put("openrouter_tentativas", "1");
+        corpos.clear();
+        ia.conversar("sys", "u");
+        String zai = corpos.stream().filter(c -> c.startsWith("/zai")).findFirst().orElseThrow();
+        assertFalse(zai.contains("INSTRUÇÕES EXTRAS"), "modelo sem prompt recebe só o pedido normal");
+    }
+
+    @Test
+    void cotaDiariaEsgotadaNaoInsisteECaiNaZai() {
+        roteiro.put("/or", List.of(429));
+        cota.add("/or");
+        assertEquals("oi", ia.conversar("s", "u"));
+        assertEquals(1, chamadas.get("/or").get(), "cota do dia acabou: esperar não adianta");
+    }
+
+    @Test
+    void testeDeTextosAvisaNaHoraQueOProvedorEsgotou() {
+        roteiro.put("/or", List.of(429));
+        IaClient.LimiteExcedido e = assertThrows(IaClient.LimiteExcedido.class, () -> ia.conversarCom("m1", "s", "u"));
+        assertEquals(1, chamadas.get("/or").get());
+        assertTrue(e.getMessage().contains("esgotado") && e.getMessage().contains("por minuto"), e.getMessage());
+        cota.add("/or");
+        e = assertThrows(IaClient.LimiteExcedido.class, () -> ia.conversarCom("m1", "s", "u"));
+        assertTrue(e.getMessage().contains("cota diária"), e.getMessage());
     }
 }

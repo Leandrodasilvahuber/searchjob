@@ -2,6 +2,8 @@ package com.huber.searchjob;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import com.huber.searchjob.db.Cofre;
+import com.huber.searchjob.db.IaProvedorRepo;
 import com.huber.searchjob.db.KvRepo;
 import com.huber.searchjob.engine.IaClient;
 import java.nio.file.Files;
@@ -23,16 +25,17 @@ class ModelosAoVivoTest {
         ds.setUrl("jdbc:sqlite:" + copia);
         JdbcClient jdbc = JdbcClient.create(ds);
         KvRepo kv = new KvRepo(jdbc);
+        IaProvedorRepo repo = new IaProvedorRepo(jdbc, new Cofre("data/cofre.key"));
         String cv = jdbc.sql("SELECT texto_extraido FROM cv LIMIT 1").query(String.class).single();
         cv = cv.substring(0, Math.min(1500, cv.length()));
         String user = "VAGA: Desenvolvedor Backend Node.js Pleno, fintech. Requisitos: Node.js, TypeScript, PostgreSQL, AWS, Docker, APIs REST. Remoto.\n\nCV:\n"
                 + cv + "\n\nPergunta: Por que você quer trabalhar nesta vaga? (máx 3 frases)";
         String system = "Você escreve respostas curtas em primeira pessoa para candidaturas, em português, usando só fatos do CV.";
         for (String m : System.getProperty("modelos").split(",")) {
-            kv.put(KvRepo.CONFIG, "openrouter_modelos", m.trim());
+            jdbc.sql("UPDATE ia_provedor SET modelos = ?, ativo = (nome = 'OpenRouter')").param(m.trim()).update();
             long t = System.currentTimeMillis();
             try {
-                String r = new IaClient(kv).conversar(system, user);
+                String r = new IaClient(kv, repo, null).conversar(system, user);
                 System.out.printf("LIVE %s OK %.1fs%n%s%n%n", m, (System.currentTimeMillis() - t) / 1000.0, r);
                 assertFalse(r.isBlank());
             } catch (RuntimeException e) {

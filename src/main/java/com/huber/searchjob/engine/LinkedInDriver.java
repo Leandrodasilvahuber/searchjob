@@ -18,7 +18,9 @@ public class LinkedInDriver extends PortalWebDriver {
     private static final Pattern EMPRESA = Pattern.compile("<h4 class=\"base-search-card__subtitle\">(.*?)</h4>", Pattern.DOTALL);
     private static final Pattern LOCAL = Pattern.compile("<span class=\"job-search-card__location\">(.*?)</span>", Pattern.DOTALL);
     private static final Pattern DATA = Pattern.compile("<time[^>]*datetime=\"(\\d{4}-\\d{2}-\\d{2})\"");
-    private static final int POR_PAGINA = 25;
+    private static final int POR_PAGINA = 10; // a listagem pública devolve 10 vagas por página
+    /** Períodos da busca (f_TPR, em segundos), do mais curto ao mais longo: 24 h, 7 dias, 14 dias. */
+    private static final int[] JANELAS = {86_400, 604_800, 1_209_600};
 
     public LinkedInDriver(NavegadorFirefox navegador, SituacaoService situacoes) {
         super(navegador, situacoes);
@@ -31,16 +33,27 @@ public class LinkedInDriver extends PortalWebDriver {
 
     @Override
     public List<Vaga> buscar(String termo, int max) throws Exception {
-        // a busca pública não ordena por data (sortBy=DD é ignorado): lê até 100 resultados e ordena aqui, mais recentes primeiro
+        // a busca pública não ordena por data (sortBy=DD é ignorado), mas o filtro de período (f_TPR) funciona: lê as
+        // janelas de 24 h, 7 dias e 14 dias nessa ordem, para as mais novas entrarem antes do corte de 100, e ordena aqui
         List<Vaga> out = new ArrayList<>();
         java.util.Set<String> ids = new java.util.HashSet<>();
-        for (int inicio = 0; inicio < 100; inicio += POR_PAGINA) {
-            String html = get("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords="
-                    + URLEncoder.encode(termo, StandardCharsets.UTF_8) + "&geoId=106057199&f_AL=true&f_TPR=r1209600&sortBy=DD&start=" + inicio);
-            List<Vaga> pagina = parse(html, POR_PAGINA);
-            if (pagina.isEmpty()) break;
-            for (Vaga v : pagina) if (ids.add(v.id())) out.add(v);
-            if (out.size() >= Math.max(max, 100)) break;
+        int limite = Math.max(max, 100);
+        janelas:
+        for (int segundos : JANELAS) {
+            for (int inicio = 0; inicio < 100 && out.size() < limite; inicio += POR_PAGINA) {
+                String html;
+                try {
+                    html = get("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords="
+                            + URLEncoder.encode(termo, StandardCharsets.UTF_8) + "&geoId=106057199&f_AL=true&f_TPR=r" + segundos
+                            + "&sortBy=DD&start=" + inicio);
+                } catch (Exception e) {
+                    if (out.isEmpty()) throw e;
+                    break janelas; // página que falhou mesmo depois das novas tentativas: fica com as vagas já lidas
+                }
+                List<Vaga> pagina = parse(html, POR_PAGINA);
+                for (Vaga v : pagina) if (ids.add(v.id())) out.add(v);
+                if (pagina.isEmpty()) break;
+            }
         }
         out.sort(Vaga.MAIS_RECENTE);
         return out.size() > max ? new ArrayList<>(out.subList(0, max)) : out;
@@ -91,6 +104,16 @@ public class LinkedInDriver extends PortalWebDriver {
         navegador.driver().get("https://www.linkedin.com/login");
         pausa(2000);
         return super.entrar(usuario, senha);
+    }
+
+    @Override
+    protected String paginaLogada() {
+        return "https://www.linkedin.com/feed/";
+    }
+
+    @Override
+    protected String paginaLogin() {
+        return "https://www.linkedin.com/login";
     }
 
     @Override

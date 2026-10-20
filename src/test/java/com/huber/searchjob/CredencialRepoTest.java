@@ -54,6 +54,12 @@ class CredencialRepoTest extends BaseIT {
     }
 
     @Test
+    void nomeDoPortalComAcentoAchaALoginDaTelaDeCredenciais() {
+        repo.salvar("solides", "eu@x.com", "segredo123"); // como a tela de credenciais grava
+        assertEquals("eu@x.com", repo.ativa("Sólides").orElseThrow().usuario()); // como o robô procura
+    }
+
+    @Test
     void trocarSenhaEmBrancoMantemETrocaComValor() {
         repo.salvar("gupy", "a@x.com", "antiga");
         repo.salvar("gupy", "a@x.com", "");

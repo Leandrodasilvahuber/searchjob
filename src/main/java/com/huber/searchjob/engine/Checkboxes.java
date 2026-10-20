@@ -26,7 +26,9 @@ final class Checkboxes {
     private static final String LER_GRUPOS = """
             var out=[],n=0;
             function visivel(x){var l=(x.labels&&x.labels[0])||x;return x.getClientRects().length>0||l.getClientRects().length>0;}
-            function rot(x){return ((x.labels&&x.labels[0])?x.labels[0].innerText:(x.parentElement?x.parentElement.innerText:x.value)||'').trim();}
+            function rot(x){ // com dois rótulos para o mesmo input (caixa vazia + texto), vale o que tem texto
+              var l=Array.prototype.filter.call(x.labels||[],function(e){return (e.innerText||'').trim();})[0]||(x.labels&&x.labels[0]);
+              return (l?l.innerText:(x.parentElement?x.parentElement.innerText:x.value)||'').trim();}
             var vistos=[];
             document.querySelectorAll('input[type=checkbox]').forEach(function(c){
               if(vistos.indexOf(c)>=0||!visivel(c))return;

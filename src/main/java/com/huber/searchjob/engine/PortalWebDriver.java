@@ -23,8 +23,9 @@ import org.openqa.selenium.WebElement;
 public abstract class PortalWebDriver implements PortalDriver {
     protected final NavegadorFirefox navegador;
     protected final SituacaoService situacoes;
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15))
-            .followRedirects(HttpClient.Redirect.NORMAL).build();
+    // HTTP/1.1: no HTTP/2 a conexão que travou (LinkedIn) continua sendo reusada e todas as buscas seguintes dão timeout
+    private final HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
+            .connectTimeout(Duration.ofSeconds(15)).followRedirects(HttpClient.Redirect.NORMAL).build();
 
     protected PortalWebDriver(NavegadorFirefox navegador, SituacaoService situacoes) {
         this.navegador = navegador;
@@ -69,13 +70,20 @@ public abstract class PortalWebDriver implements PortalDriver {
         return Optional.empty();
     }
 
-    /** Limite de requisições (429) é intermitente nas buscas públicas: espera e tenta de novo antes de falhar. */
+    /** Limite de requisições (429) e requisição pendurada (timeout) são intermitentes nas buscas públicas: espera e tenta de novo antes de falhar. */
     protected String get(String url) throws Exception {
         for (int tentativa = 1; ; tentativa++) {
-            HttpResponse<String> r = http.send(HttpRequest.newBuilder(URI.create(url))
-                    .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0")
-                    .header("Accept-Language", "pt-BR,pt;q=0.9").timeout(Duration.ofSeconds(30)).build(),
-                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> r;
+            try {
+                r = http.send(HttpRequest.newBuilder(URI.create(url))
+                        .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0")
+                        .header("Accept-Language", "pt-BR,pt;q=0.9").timeout(Duration.ofSeconds(30)).build(),
+                        HttpResponse.BodyHandlers.ofString());
+            } catch (java.net.http.HttpTimeoutException e) {
+                if (tentativa >= 3) throw e;
+                pausa(3000L * tentativa);
+                continue;
+            }
             if (r.statusCode() == 404) return "";
             if (r.statusCode() == 429 && tentativa < 5) {
                 pausa(5000L * tentativa);
@@ -84,6 +92,43 @@ public abstract class PortalWebDriver implements PortalDriver {
             if (r.statusCode() / 100 != 2) throw new IllegalStateException(nome() + " busca HTTP " + r.statusCode());
             return r.body();
         }
+    }
+
+    /** Página que só abre logado (deslogado, o portal redireciona para fora dela); null se o portal não confere. */
+    protected String paginaLogada() {
+        return null;
+    }
+
+    @Override
+    public Boolean logado() {
+        return paginaLogada() == null ? null : LoginAutomatico.ficaNaAreaLogada(navegador.driver(), paginaLogada());
+    }
+
+    /** Tela de login do portal; null se o portal não tem (a busca e a candidatura não pedem conta). */
+    protected String paginaLogin() {
+        return null;
+    }
+
+    @Override
+    public boolean abrirLogin() {
+        return paginaLogin() != null && LoginAutomatico.abrirLogin(navegador.driver(), paginaLogin());
+    }
+
+    @Override
+    public boolean pedeCelular() {
+        return LoginAutomatico.pedeCelular(navegador.driver());
+    }
+
+    @Override
+    public boolean entrarComGoogle(String email) {
+        return LoginAutomatico.entrarComGoogle(navegador.driver(), email);
+    }
+
+    @Override
+    public boolean abrirFormularioLogin() {
+        if (paginaLogin() == null) return false;
+        LoginAutomatico.abrirLogin(navegador.driver(), paginaLogin(), false);
+        return true;
     }
 
     @Override
@@ -103,6 +148,11 @@ public abstract class PortalWebDriver implements PortalDriver {
 
     @Override
     public boolean entrar(String usuario, String senha) {
+        return LoginAutomatico.entrar(navegador.driver(), usuario, senha);
+    }
+
+    @Override
+    public boolean entrarNaPaginaAberta(String usuario, String senha) {
         return LoginAutomatico.entrar(navegador.driver(), usuario, senha);
     }
 
@@ -185,6 +235,10 @@ public abstract class PortalWebDriver implements PortalDriver {
             // antes de abrir a candidatura, o botão de abertura vem primeiro: a página da vaga tem outros "Avançar" (galeria de fotos)
             WebElement abertura = !abriu && envio == null && !formularioAberto(d) ? achar(d, botoesAbertura()) : null;
             WebElement botao = envio != null ? envio : abertura != null ? abertura : achar(d, botoesAvanco());
+            if (botao == null && clicouEnvio) { // a confirmação (toast/selo) pode chegar depois da leitura da página
+                Optional<String> ok = confirmacao(d);
+                if (ok.isPresent()) return new Desfecho(Status.ENVIADA, ok.get());
+            }
             if (botao == null)
                 return new Desfecho(Status.ERRO, "nenhum botão de avanço/envio encontrado (passo " + passo + ") · "
                         + LoginAutomatico.diagnostico(d) + " · botões visíveis: " + botoesVisiveis(d)
@@ -217,13 +271,24 @@ public abstract class PortalWebDriver implements PortalDriver {
         return new Desfecho(Status.ERRO, "fluxo não terminou em 20 passos · botões visíveis: " + botoesVisiveis(d) + " · " + resumo(d));
     }
 
+    /** Espera até ~8 s por um texto de sucesso ou de candidatura feita depois do clique em enviar. */
+    private Optional<String> confirmacao(WebDriver d) {
+        for (int espera = 0; espera < 4; espera++) {
+            pausa(2000);
+            String corpo = Texto.normalizar(d.findElement(By.tagName("body")).getText());
+            for (String s : textosSucesso()) if (corpo.contains(s)) return Optional.of(s);
+            for (String s : textosJaCandidatou()) if (corpo.contains(s)) return Optional.of(s);
+        }
+        return Optional.empty();
+    }
+
     private Desfecho preencherCampos(WebDriver d, String contexto, Cv cv, BooleanSupplier continuar) {
         for (WebElement el : d.findElements(By.cssSelector("input[type=text],input[type=number],input:not([type]),textarea"))) {
             try {
                 if (!el.isDisplayed() || !el.isEnabled()) continue;
                 String atual = el.getAttribute("value");
                 if (atual != null && !atual.isBlank()) continue;
-                String pergunta = rotulo(d, el);
+                String pergunta = rotuloDoCampo(d, el);
                 if (pergunta.isBlank() || ehBusca(pergunta)) continue;
                 boolean area = "textarea".equalsIgnoreCase(el.getTagName());
                 if (Texto.perguntaEmIngles(pergunta)) return new Desfecho(Status.PULADA, "vaga em inglês: " + pergunta);
@@ -514,6 +579,11 @@ public abstract class PortalWebDriver implements PortalDriver {
     private static boolean ehBusca(String rotulo) {
         String n = Texto.normalizar(rotulo);
         return n.equals("buscar") || n.contains("pesquis") || n.contains("search");
+    }
+
+    /** Pergunta de um campo de texto; vazio faz o campo ser ignorado. */
+    protected String rotuloDoCampo(WebDriver d, WebElement el) {
+        return rotulo(d, el);
     }
 
     private static String rotulo(WebDriver d, WebElement el) {

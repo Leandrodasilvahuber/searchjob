@@ -5,7 +5,7 @@
 <nav th:replace="~{layout :: menu(${pagina})}"></nav>
 <main>
   <h1 th:text="${tabela=='dado_fixo'} ? 'Dados fixos' : (${tabela=='preferencia'} ? 'Preferências' : 'Configuração')"></h1>
-  <p class="mut" th:if="${tabela=='config'}">portais: gupy · dry_run: true/false · openrouter_chave / zai_chave: chaves da IA (a da Z.ai vem do openclaude). · openrouter_timeout_s / zai_timeout_s (120 / 300) e openrouter_tentativas / zai_tentativas (10 / 1): prazo de cada chamada e tentativas antes de passar adiante.</p>
+  <p class="mut" th:if="${tabela=='config'}">portais: gupy,linkedin,... · dry_run: true/false · max_vagas. Login dos portais e provedores de IA ficam em Portais e IA.</p>
   <div class="card">
     <table>
       <tr><th style="width:28%">Chave</th><th>Valor</th><th style="width:150px"></th></tr>

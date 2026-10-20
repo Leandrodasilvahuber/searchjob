@@ -42,6 +42,38 @@ public class GupyDriver implements PortalDriver {
         return "Gupy";
     }
 
+    /** Deslogado, a área do candidato redireciona para /candidates/signin (a antiga login.gupy.io/candidates/applications agora redireciona para cá). */
+    @Override
+    public Boolean logado() {
+        return LoginAutomatico.ficaNaAreaLogada(navegador.driver(), "https://portal.gupy.io/my/applications");
+    }
+
+    @Override
+    public boolean abrirLogin() {
+        return LoginAutomatico.abrirLogin(navegador.driver(), "https://login.gupy.io/candidates/signin");
+    }
+
+    @Override
+    public boolean pedeCelular() {
+        return LoginAutomatico.pedeCelular(navegador.driver());
+    }
+
+    @Override
+    public boolean entrarComGoogle(String email) {
+        return LoginAutomatico.entrarComGoogle(navegador.driver(), email);
+    }
+
+    @Override
+    public boolean abrirFormularioLogin() {
+        LoginAutomatico.abrirLogin(navegador.driver(), "https://login.gupy.io/candidates/signin", false);
+        return true;
+    }
+
+    @Override
+    public boolean entrarNaPaginaAberta(String usuario, String senha) {
+        return LoginAutomatico.entrar(navegador.driver(), usuario, senha);
+    }
+
     @Override
     public boolean pedeCaptcha() {
         return LoginAutomatico.pedeCaptcha(navegador.driver());
@@ -60,8 +92,9 @@ public class GupyDriver implements PortalDriver {
     @Override
     public boolean entrar(String usuario, String senha) {
         WebDriver d = navegador.driver();
-        // A conta do Gupy entra pelo LinkedIn: a senha do formulário e-mail/senha não vale, então clica no botão do LinkedIn
-        WebElement linkedin = botaoLinkedin(d);
+        // formulário e-mail/senha primeiro; sem ele na página, vai pelo botão do LinkedIn
+        if (LoginAutomatico.entrar(d, usuario, senha)) return true;
+        WebElement linkedin = LoginAutomatico.botaoLinkedin(d);
         if (linkedin != null) {
             ((JavascriptExecutor) d).executeScript("arguments[0].click()", linkedin);
             pausa(6000);
@@ -72,19 +105,7 @@ public class GupyDriver implements PortalDriver {
             }
             return !paginaDeLogin(d, d.getCurrentUrl()) && !d.getCurrentUrl().contains("linkedin.com");
         }
-        return LoginAutomatico.entrar(d, usuario, senha);
-    }
-
-    private static WebElement botaoLinkedin(WebDriver d) {
-        for (WebElement e : d.findElements(By.cssSelector("button,a,[role=button]"))) {
-            try {
-                if (e.isDisplayed() && e.isEnabled() && (e.getText() + " " + e.getAttribute("aria-label")).toLowerCase().contains("linkedin"))
-                    return e;
-            } catch (org.openqa.selenium.StaleElementReferenceException ignored) {
-                // elemento trocado durante a leitura
-            }
-        }
-        return null;
+        return false;
     }
 
     @Override

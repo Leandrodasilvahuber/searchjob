@@ -123,10 +123,7 @@ public class SituacaoService {
             Resultado r = gerarPersonalizado(portal, pergunta, contextoVaga, cv);
             if (r != null) return r;
         }
-        if (sensivel(pergunta)) {
-            if (!naoInteragir()) aviso.chamarUsuario();
-            return new Resultado(Tipo.SENSIVEL, null, 0);
-        }
+        if (sensivel(pergunta)) return new Resultado(Tipo.SENSIVEL, null, 0); // a vaga é pulada: dado sensível não vira resposta salva
 
         // a instrução de "texto personalizado" não é resposta: nunca vai para o campo
         // pretensão sem regime na pergunta: o valor (CLT ou PJ) depende da vaga, então a resposta de outra vaga não serve
@@ -156,7 +153,7 @@ public class SituacaoService {
         if (ia.configurado()) {
             JsonNode r;
             try {
-                r = ia.conversarJson(SYSTEM, montarPedido(pergunta, contextoVaga));
+                r = ia.conversarJson(SYSTEM, montarPedido(pergunta, contextoVaga, limite));
             } catch (IaClient.IaIndisponivel e) {
                 throw e; // todas as IAs falharam: a vaga é pulada (Orquestrador)
             } catch (RuntimeException e) {
@@ -251,17 +248,7 @@ public class SituacaoService {
                     "ia", SituacaoRepo.ATIVA, "");
         }
         try {
-            String pedido = "PERGUNTA/CAMPO:\n" + pergunta + "\n\nINSTRUÇÕES DO CANDIDATO PARA ESTE TIPO DE CAMPO:\n" + instrucao
-                    + (aprovada.isBlank() ? "" : "\n\nRESPOSTA APROVADA ANTERIORMENTE (base de fatos e de tom):\n" + aprovada)
-                    + limite
-                    + "\n\nVAGA:\n" + nvl(contextoVaga, "")
-                    + "\n\nDADOS FIXOS:\n" + cvContexto.dadosParaPrompt()
-                    + (cv != null && cv.textoExtraido() != null
-                        ? "\n\nCURRÍCULO ENVIADO PARA ESTA VAGA:\n" + cv.textoExtraido()
-                          + "\n\nOUTROS CURRÍCULOS DO CANDIDATO (mesma pessoa, outro foco; os fatos também valem):\n"
-                          + cvContexto.textoCvs()
-                        : "\n\nCURRÍCULOS DO CANDIDATO:\n" + cvContexto.textoCvs());
-            String texto = ia.conversar(SYSTEM_TEXTO, pedido).trim();
+            String texto = ia.conversar(SYSTEM_TEXTO, pedidoTexto(pergunta, instrucao, aprovada, limite, contextoVaga, cv)).trim();
             if (texto.isBlank() || "null".equalsIgnoreCase(texto)) return null;
             textos.inserir(portal, pergunta, primeiraLinha(contextoVaga), cv == null ? "" : cv.nome(), texto);
             return new Resultado(Tipo.APLICADA, texto, id);
@@ -270,6 +257,49 @@ public class SituacaoService {
         } catch (RuntimeException e) {
             return null; // IA fora do ar: cai no fluxo normal (resposta salva ou chamar o usuário)
         }
+    }
+
+    private String pedidoTexto(String pergunta, String instrucao, String aprovada, String limite, String contextoVaga, Cv cv) {
+        return "PERGUNTA/CAMPO:\n" + pergunta + "\n\nINSTRUÇÕES DO CANDIDATO PARA ESTE TIPO DE CAMPO:\n" + instrucao
+                + (aprovada.isBlank() ? "" : "\n\nRESPOSTA APROVADA ANTERIORMENTE (base de fatos e de tom):\n" + aprovada)
+                + limite
+                + "\n\nVAGA:\n" + nvl(contextoVaga, "")
+                + "\n\nDADOS FIXOS:\n" + cvContexto.dadosParaPrompt()
+                + (cv != null && cv.textoExtraido() != null
+                    ? "\n\nCURRÍCULO ENVIADO PARA ESTA VAGA:\n" + cv.textoExtraido()
+                      + "\n\nOUTROS CURRÍCULOS DO CANDIDATO (mesma pessoa, outro foco; os fatos também valem):\n"
+                      + cvContexto.textoCvs()
+                    : "\n\nCURRÍCULOS DO CANDIDATO:\n" + cvContexto.textoCvs());
+    }
+
+    /** Resposta de um modelo no teste de textos: o que iria para o campo e qual dos dois caminhos do sistema respondeu. */
+    public record Teste(String caminho, String resposta, String motivo, long ms) {}
+
+    /**
+     * Teste de textos do painel: monta o pedido igual à busca (texto livre personalizado ou JSON das perguntas objetivas)
+     * e chama só o {@code modelo}. Não consulta as respostas salvas como atalho nem grava nada.
+     *
+     * @param tipo texto, area, escolha (radio/select) ou multipla (checkboxes)
+     */
+    public Teste testar(String pergunta, String tipo, java.util.List<String> opcoes, String contextoVaga, String modelo) {
+        boolean areaDeTexto = "area".equals(tipo);
+        java.util.List<String> ordenadas = new java.util.ArrayList<>(opcoes);
+        java.util.Collections.sort(ordenadas); // igual a Radios/Selects/Checkboxes
+        String chave = switch (tipo) {
+            case "escolha" -> pergunta + " [opções: " + String.join(" | ", ordenadas) + "]";
+            case "multipla" -> Checkboxes.MARCADOR + pergunta + " [opções: " + String.join(" | ", ordenadas) + "]";
+            default -> pergunta;
+        };
+        long inicio = System.currentTimeMillis();
+        if (sensivel(chave)) return new Teste("sensível", "", "dado sensível: a busca chama você", 0);
+        if (!fatual(chave) && discursiva(chave, areaDeTexto)) {
+            String texto = ia.conversarCom(modelo, SYSTEM_TEXTO, pedidoTexto(chave, INSTRUCAO_PADRAO, "", "", contextoVaga, null)).trim();
+            return new Teste("texto personalizado", texto, "", System.currentTimeMillis() - inicio);
+        }
+        JsonNode r = IaClient.extrairJson(ia.conversarCom(modelo, SYSTEM, montarPedido(chave, contextoVaga, "")));
+        boolean ok = r.path("resolvido").asBoolean(false) && !nulo(r.path("resposta").asText(""));
+        return new Teste(ok ? "resposta objetiva" : "não resolvido (vira pendência)", ok ? r.path("resposta").asText() : "",
+                r.path("motivo").asText(""), System.currentTimeMillis() - inicio);
     }
 
     /** Rascunho da IA para uma pendência (botão da tela de pendências): texto livre ou uma das opções, sem gravar nada. */
@@ -329,6 +359,32 @@ public class SituacaoService {
             Sem markdown, sem títulos e sem aspas. Responda SOMENTE com o texto final, pronto para colar no campo.
             """;
 
+    private static final java.util.regex.Pattern FORA_DAS_OPCOES =
+            java.util.regex.Pattern.compile("^a resposta \"[\\s\\S]*\" não corresponde a nenhuma opção de: ([\\s\\S]+)$");
+
+    /**
+     * Garante que a pergunta de um chamado de pendência apareça em Pendências para o usuário responder. Hoje só a
+     * resposta salva que não casa com as opções do campo chega aqui sem formulário: a regra exata é desativada (com
+     * essas opções ela nunca vai servir) e abre-se a pendência. Devolve o id, ou 0 se o chamado não é uma pergunta
+     * respondível em Pendências (dado sensível, campo ilegível, teste do portal).
+     */
+    public long abrirPendencia(String portal, String motivo, String contextoVaga) {
+        java.util.regex.Matcher m = FORA_DAS_OPCOES.matcher(motivo == null ? "" : motivo);
+        if (!m.matches()) return 0;
+        String pergunta = m.group(1);
+        String hash = Texto.hash(pergunta);
+        Optional<Situacao> aberta = repo.pendentePorHash(hash);
+        if (aberta.isPresent()) return aberta.get().id();
+        repo.ativaPorHash(hash).ifPresent(s -> repo.definirStatus(s.id(), SituacaoRepo.INATIVA));
+        return repo.inserir(portal, "pergunta", pergunta, hash, null, "usuario", SituacaoRepo.AGUARDANDO_USUARIO, contextoVaga);
+    }
+
+    /** A pendência {@code id} já tem resposta salva (ou foi descartada): a vaga parada nela pode seguir. */
+    public boolean pendenciaFechada(long id) {
+        return repo.porId(id).map(s -> !SituacaoRepo.AGUARDANDO_USUARIO.equals(s.status())
+                && !SituacaoRepo.PENDENTE_CONFIRMACAO.equals(s.status())).orElse(true);
+    }
+
     /** Usuário confirma (ou corrige) a resposta da IA: vira regra ativa, origem ia_confirmada. */
     public void confirmar(long id, String respostaFinal) {
         Situacao s = repo.porId(id).orElseThrow();
@@ -352,7 +408,7 @@ public class SituacaoService {
             da VAGA (PJ, CLT, cooperado = PJ); valores conforme as PREFERÊNCIAS. Anos de experiência: só o número (ex.: 5); tecnologia que não aparece no CV => resolvido com "0". Dados sensíveis (RG, nome do pai, senhas, bancários) => não resolvido.
             """;
 
-    private String montarPedido(String pergunta, String contextoVaga) {
+    private String montarPedido(String pergunta, String contextoVaga, String limite) {
         StringBuilder sb = new StringBuilder();
         sb.append("DATA DE HOJE: ").append(java.time.LocalDate.now()).append(" (use para calcular tempo de experiência)\n\n")
                 .append("PERGUNTA DO FORMULÁRIO:\n").append(pergunta)

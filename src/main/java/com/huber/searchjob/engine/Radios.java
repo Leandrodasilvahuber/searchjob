@@ -31,7 +31,7 @@ final class Radios {
             document.querySelectorAll('input[type=radio]').forEach(function(r){
               if(!visivel(r))return; // duplicatas ocultas (mesmo name) não entram no grupo
               var chave=r.name;
-              if(!chave){var c=r.closest('fieldset,[role=radiogroup]');
+              if(!chave){var c=r.closest('fieldset,[role=radiogroup],ul,ol'); // sem name: cada pergunta numa lista própria (Sólides)
                 if(c){if(!c.getAttribute('data-sj-c'))c.setAttribute('data-sj-c','c'+(sem++));chave='c:'+c.getAttribute('data-sj-c');}
                 else chave='solto';}
               if(!grupos[chave]){grupos[chave]=[];ordem.push(chave);}
@@ -42,7 +42,9 @@ final class Radios {
               g.forEach(function(x){x.setAttribute('data-sj',chave);});
               var r=g[0];
               var opts=g.map(function(x){
-                var lb=(x.labels&&x.labels[0])||(x.id?document.querySelector('label[for="'+x.id+'"]'):null);
+                // com dois rótulos para o mesmo input (bolinha vazia + texto), vale o que tem texto
+                var lb=Array.prototype.filter.call(x.labels||[],function(l){return (l.innerText||'').trim();})[0]
+                  ||(x.labels&&x.labels[0])||(x.id?document.querySelector('label[for="'+x.id+'"]'):null);
                 var l=lb?(lb.innerText||lb.textContent):'';
                 var rr=x.closest('[role=radio]'); // radio customizado: o texto fica ao lado do input, dentro do papel radio
                 if(!(l||'').trim()&&rr)l=rr.innerText||rr.textContent;

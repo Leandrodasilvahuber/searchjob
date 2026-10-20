@@ -80,6 +80,16 @@ class SessaoE2ETest extends BaseIT {
         }
 
         @Override
+        public Boolean logado() {
+            return true; // a conferência do início passa; o login é cobrado na candidatura (desfechos)
+        }
+
+        @Override
+        public boolean abrirFormularioLogin() {
+            return true;
+        }
+
+        @Override
         public String[] lerLogin() {
             return digitado;
         }
@@ -117,7 +127,9 @@ class SessaoE2ETest extends BaseIT {
         portal.digitado = new String[] {null, null};
         cvs.salvar("CV_NodeJS", "", "texto node", "node,typescript");
         cvs.salvar("CV_PHP_Laravel", "", "texto php", "php,laravel,vue");
-        kv.put(KvRepo.CONFIG, "portais", "fake");
+        jdbc.sql("DELETE FROM portal").update(); // só o portal de mentira, com a conta Google para contar como configurado
+        jdbc.sql("INSERT INTO portal(chave, nome, modo_login, ordem) VALUES ('fake', 'Fake', 'google', 0)").update();
+        credenciais.salvar("google", "eu@gmail.com", "g1");
         kv.put(KvRepo.CONFIG, "dry_run", "false");
         kv.put(KvRepo.CONFIG, "max_vagas", "10");
         kv.put(KvRepo.CONFIG, "ia_espera_tentativa_ms", "0");

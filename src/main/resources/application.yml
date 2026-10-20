@@ -2,6 +2,9 @@ server:
   port: 8787
   address: 127.0.0.1
 spring:
+  config:
+    # variáveis locais opcionais (fora do git); logins e chaves de IA ficam no banco, em Portais e IA
+    import: "optional:file:.env[.properties]"
   datasource:
     url: jdbc:sqlite:data/searchjob.db
     driver-class-name: org.sqlite.JDBC

@@ -31,8 +31,8 @@ public class CathoDriver extends PortalWebDriver {
         String slug = URLEncoder.encode(Texto.normalizar(termo).replace(' ', '-'), StandardCharsets.UTF_8);
         // a Catho devolve vagas sem relação com o termo: o card casando basta; senão lê a descrição completa da vaga
         List<Vaga> out = new ArrayList<>();
-        List<Vaga> lidas = new ArrayList<>(parse(get("https://www.catho.com.br/vagas/" + slug + "/"), Integer.MAX_VALUE, LocalDate.now()));
-        lidas.sort(Vaga.MAIS_RECENTE); // a listagem vem por relevância: mais recentes primeiro
+        List<Vaga> lidas = new ArrayList<>(parse(get("https://www.catho.com.br/vagas/" + slug + "/?order=dataAtualizacao"), Integer.MAX_VALUE, LocalDate.now()));
+        lidas.sort(Vaga.MAIS_RECENTE); // order=dataAtualizacao já traz as mais novas; vagas em destaque vêm no topo fora de ordem
         for (Vaga v : lidas) {
             if (out.size() >= max) break;
             if (mencionaTermo(v.cargo() + " " + v.descricao(), termo) || mencionaTermo(descricaoCompleta(v.url()), termo))
@@ -104,6 +104,17 @@ public class CathoDriver extends PortalWebDriver {
                     "https://www.catho.com.br" + l.group(1), local, "", pub, Html.texto(art)));
         }
         return out;
+    }
+
+    /** Deslogado, a área do candidato redireciona para a home. */
+    @Override
+    protected String paginaLogada() {
+        return "https://www.catho.com.br/area-candidato/";
+    }
+
+    @Override
+    protected String paginaLogin() {
+        return "https://www.catho.com.br/signin/";
     }
 
     @Override

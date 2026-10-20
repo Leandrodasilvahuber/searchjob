@@ -35,12 +35,46 @@ public class NavegadorFirefox {
                 o.setScriptTimeout(java.time.Duration.ofSeconds(30));
                 // página em loop de JavaScript deixa o Firefox sem responder: sem este limite o Selenium espera 3 min por comando
                 var cliente = org.openqa.selenium.remote.http.ClientConfig.defaultConfig().readTimeout(java.time.Duration.ofSeconds(45));
-                driver = new FirefoxDriver(org.openqa.selenium.firefox.GeckoDriverService.createDefaultService(), o, cliente);
+                try {
+                    driver = new FirefoxDriver(org.openqa.selenium.firefox.GeckoDriverService.createDefaultService(), o, cliente);
+                } catch (org.openqa.selenium.SessionNotCreatedException e) {
+                    // Firefox órfão (de uma execução anterior do app) segurando o perfil: libera e tenta de novo
+                    if (!liberarPerfil(perfil)) throw e;
+                    driver = new FirefoxDriver(org.openqa.selenium.firefox.GeckoDriverService.createDefaultService(), o, cliente);
+                }
             } catch (Exception e) {
                 throw new IllegalStateException("Não foi possível abrir o Firefox: " + e.getMessage(), e);
             }
         }
         return driver;
+    }
+
+    /**
+     * Encerra os Firefox que ainda usam o perfil e apaga o lock que ficou para trás.
+     * Devolve false se não havia nada para liberar (o erro é outro).
+     */
+    static boolean liberarPerfil(Path perfil) {
+        boolean liberou = false;
+        for (ProcessHandle p : ProcessHandle.allProcesses().toList()) {
+            String cmd = p.info().commandLine().orElse("");
+            if (cmd.contains("firefox") && !cmd.contains("geckodriver") && cmd.contains(perfil.toString())) {
+                p.destroyForcibly();
+                try {
+                    p.onExit().get(10, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    // segue: o lock é apagado mesmo assim
+                }
+                liberou = true;
+            }
+        }
+        for (String lock : new String[] {"lock", ".parentlock"}) {
+            try {
+                liberou |= Files.deleteIfExists(perfil.resolve(lock));
+            } catch (java.io.IOException e) {
+                // sem permissão: o Firefox reclama de novo e o erro original sobe
+            }
+        }
+        return liberou;
     }
 
     /**

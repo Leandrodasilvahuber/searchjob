@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.huber.searchjob.db.CandidaturaRepo;
 import com.huber.searchjob.db.Cv;
 import com.huber.searchjob.db.CredencialRepo;
+import com.huber.searchjob.db.PortalRepo;
 import com.huber.searchjob.db.CvRepo;
 import com.huber.searchjob.db.KvRepo;
 import java.time.LocalDate;
@@ -34,8 +35,9 @@ public class Orquestrador {
     private final Aviso aviso;
     private final FabricaDrivers fabrica;
     private final CredencialRepo credenciais;
+    private final PortalRepo portais;
 
-    /** Pedido de ajuda que pausa a sessão: {@code tipo} é LOGIN (login/CAPTCHA) ou PENDENCIA (pergunta sem resposta). */
+    /** Pedido de ajuda que pausa a sessão: {@code tipo} é LOGIN (login/CAPTCHA), PENDENCIA (pergunta a responder em Pendências) ou MANUAL (ação na janela do Firefox, ex.: teste do portal). */
     public record Chamado(String tipo, String portal, String vaga, String motivo) {}
 
     private static final long BIP_A_CADA_MS = 10_000;
@@ -61,9 +63,10 @@ public class Orquestrador {
 
     public Orquestrador(KvRepo kv, CandidaturaRepo candidaturas, CvRepo cvs, FiltroVaga filtro, EscolhaCv escolhaCv,
                         SituacaoService situacoes, IaClient ia, CvContexto cvContexto, Aviso aviso,
-                        FabricaDrivers fabrica, CredencialRepo credenciais) {
+                        FabricaDrivers fabrica, CredencialRepo credenciais, PortalRepo portais) {
         this.fabrica = fabrica;
         this.credenciais = credenciais;
+        this.portais = portais;
         this.kv = kv;
         this.candidaturas = candidaturas;
         this.cvs = cvs;
@@ -109,14 +112,20 @@ public class Orquestrador {
 
     /** Igual a {@link #aguardar(Chamado)}, mas chama {@code aCadaSegundo} enquanto espera (ex.: capturar o login digitado). */
     private String aguardar(Chamado c, Runnable aCadaSegundo) {
+        return aguardar(c, aCadaSegundo, () -> false);
+    }
+
+    /** Igual a {@link #aguardar(Chamado, Runnable)}, mas segue sozinho ("continuar") assim que {@code resolvido} for true (ex.: pendência respondida). */
+    private String aguardar(Chamado c, Runnable aCadaSegundo, java.util.function.BooleanSupplier resolvido) {
         if (!c.tipo().equals("LOGIN") && kv.booleano(KvRepo.CONFIG, "nao_interagir", false)) {
             registrar("não interagir: pulando sem chamar você (" + c.motivo() + ")");
             return "pular";
         }
         decisoes.clear();
         chamado = c;
-        registrar("aguardando", "vaga aguardando intervenção: " + (c.tipo().equals("LOGIN")
-                ? "faça login em " + c.portal() : "pendência em " + c.portal()) + " (" + c.motivo() + ")", c.tipo());
+        registrar("aguardando", (c.tipo().equals("LOGIN")
+                ? "não logado em " + c.portal() + ", aguardando você entrar" : "vaga aguardando intervenção: pendência em " + c.portal())
+                + " (" + c.motivo() + ")", c.tipo());
         long ultimoBip = 0;
         try {
             while (rodando) {
@@ -128,6 +137,7 @@ public class Orquestrador {
                 }
                 String d = decisoes.poll(1, TimeUnit.SECONDS);
                 if (d != null) return d;
+                if (resolvido.getAsBoolean()) return "continuar";
                 aCadaSegundo.run();
             }
             return "pular";
@@ -158,17 +168,54 @@ public class Orquestrador {
         return motivo.contains("login") && !motivo.toLowerCase().contains("captcha");
     }
 
-    /** Usa o login ativo do portal no cofre. Devolve true se preencheu e enviou o formulário. */
+    /** Login ativo do portal salvo em Portais e IA. */
+    private Optional<CredencialRepo.Login> loginProprio(String portal) {
+        return credenciais.ativa(portal);
+    }
+
+    /** Conta Google para "Entrar com Google": a conta Google cadastrada ou, sem ela, o usuário do login do portal. */
+    private String emailGoogle(String portal) {
+        try {
+            return loginProprio(PortalRepo.GOOGLE).or(() -> loginProprio(portal)).map(CredencialRepo.Login::usuario).orElse("");
+        } catch (RuntimeException e) {
+            return "";
+        }
+    }
+
+    private boolean temLoginProprio(String portal) {
+        try {
+            return loginProprio(portal).isPresent();
+        } catch (RuntimeException e) {
+            return false; // login salvo ilegível: entrarAutomatico registra o motivo
+        }
+    }
+
+    /** Tem como entrar: login do próprio portal ou a conta do modo escolhido (Google ou LinkedIn) salva em Portais e IA. */
+    private boolean configurado(PortalRepo.Portal p) {
+        if (temLoginProprio(p.chave())) return true;
+        return switch (p.modoLogin()) {
+            case PortalRepo.GOOGLE -> temLoginProprio(PortalRepo.GOOGLE);
+            case PortalRepo.LINKEDIN -> temLoginProprio(PortalRepo.LINKEDIN);
+            default -> false;
+        };
+    }
+
+    /** Usa o login próprio do portal (Portais e IA). Devolve true se preencheu e enviou o formulário. */
     private boolean entrarAutomatico(PortalDriver driver) {
         Optional<CredencialRepo.Login> login;
         try {
-            login = credenciais.ativa(driver.nome());
+            login = loginProprio(driver.nome());
         } catch (RuntimeException e) {
             registrar("login salvo de " + driver.nome() + " ilegível: " + e.getMessage());
             return false;
         }
         if (login.isEmpty()) {
-            registrar("sem login salvo para " + driver.nome() + " — cadastre em Credenciais para entrar sozinho");
+            // sem login próprio: "Entrar com LinkedIn" (Sólides, Gupy) com a sessão ou o login salvo do LinkedIn
+            if (driver.abrirLogin()) {
+                registrar(driver.nome() + ": sem login salvo — tentando \"Entrar com LinkedIn\"");
+                return Boolean.TRUE.equals(driver.logado()) || entrarNoLinkedin(driver);
+            }
+            registrar("sem login salvo para " + driver.nome() + " — cadastre em Portais e IA para entrar sozinho");
             return false;
         }
         try {
@@ -181,6 +228,150 @@ public class Orquestrador {
             registrar("login automático em " + driver.nome() + " falhou: " + e.getMessage());
             return false;
         }
+    }
+
+    /** Na tela de login do LinkedIn aberta pelo "Entrar com LinkedIn" de outro portal, preenche o login salvo do LinkedIn. */
+    private boolean entrarNoLinkedin(PortalDriver driver) {
+        Optional<CredencialRepo.Login> login;
+        try {
+            login = loginProprio("linkedin");
+        } catch (RuntimeException e) {
+            return false;
+        }
+        if (login.isEmpty()) return false;
+        registrar(driver.nome() + ": entrando no LinkedIn com " + login.get().usuario());
+        boolean enviou = driver.entrarNaPaginaAberta(login.get().usuario(), login.get().senha());
+        if (enviou) dormir(4000); // o LinkedIn devolve para o portal, que troca o código pela sessão
+        return enviou;
+    }
+
+    /** Resultado do login automático: entrou, parou na confirmação do celular, ou passou pela tela do LinkedIn. */
+    private record Tentativa(boolean logado, boolean celular, boolean viaLinkedin) {}
+
+    /**
+     * Login automático: primeiro o modo escolhido para o portal em Portais e IA (Google, LinkedIn ou e-mail e senha do
+     * portal) e, se não entrar, os outros na ordem Google → LinkedIn → portal. Confirmação no celular (LinkedIn/Google):
+     * para de navegar, para não perder a tela que espera a aprovação.
+     */
+    private Tentativa tentarEntrar(PortalDriver driver) {
+        String modo;
+        try {
+            modo = portais.modo(driver.nome());
+        } catch (RuntimeException e) {
+            modo = PortalRepo.GOOGLE;
+        }
+        Tentativa t = new Tentativa(false, false, false);
+        for (String m : PortalRepo.ordemLogin(modo)) {
+            t = switch (m) {
+                case PortalRepo.GOOGLE -> entrarPeloGoogle(driver, t);
+                case PortalRepo.LINKEDIN -> entrarPeloLinkedin(driver, t);
+                default -> entrarComSenha(driver, t);
+            };
+            if (t.logado() || t.celular()) return t;
+        }
+        return t;
+    }
+
+    private Tentativa entrarPeloGoogle(PortalDriver driver, Tentativa t) {
+        if (!driver.abrirFormularioLogin() || !driver.entrarComGoogle(emailGoogle(driver.nome()))) return t;
+        registrar(driver.nome() + ": tentando \"Entrar com Google\"");
+        if (driver.pedeCelular()) return new Tentativa(false, true, t.viaLinkedin());
+        if (!Boolean.TRUE.equals(driver.logado())) return t;
+        registrar(driver.nome() + ": logado pelo Google");
+        return new Tentativa(true, false, t.viaLinkedin());
+    }
+
+    private Tentativa entrarPeloLinkedin(PortalDriver driver, Tentativa t) {
+        if (!driver.abrirLogin()) return t;
+        registrar(driver.nome() + ": tentando \"Entrar com LinkedIn\"");
+        if (driver.pedeCelular()) return new Tentativa(false, true, true);
+        if (Boolean.TRUE.equals(driver.logado())) {
+            registrar(driver.nome() + ": logado pelo LinkedIn");
+            return new Tentativa(true, false, true);
+        }
+        driver.abrirLogin(); // a conferência saiu da tela do LinkedIn: volta para ela e tenta o login salvo
+        if (entrarNoLinkedin(driver)) {
+            if (driver.pedeCelular()) return new Tentativa(false, true, true);
+            if (Boolean.TRUE.equals(driver.logado())) {
+                registrar(driver.nome() + ": logado pelo LinkedIn com o login salvo");
+                return new Tentativa(true, false, true);
+            }
+        }
+        return new Tentativa(false, false, true);
+    }
+
+    private Tentativa entrarComSenha(PortalDriver driver, Tentativa t) {
+        if (!temLoginProprio(driver.nome()) || !driver.abrirFormularioLogin()) return t;
+        if (entrarAutomatico(driver)) {
+            if (driver.pedeCelular()) return new Tentativa(false, true, t.viaLinkedin());
+            if (Boolean.TRUE.equals(driver.logado())) {
+                registrar(driver.nome() + ": logado com e-mail e senha");
+                return new Tentativa(true, false, t.viaLinkedin());
+            }
+        }
+        registrar(driver.nome() + ": e-mail e senha não entraram — " + driver.diagnostico());
+        return t;
+    }
+
+    /**
+     * Ao trocar de portal, confere a sessão antes de buscar. Deslogado, tenta "Entrar com Google", depois "Entrar com
+     * LinkedIn" e por último o login próprio do portal (Portais e IA) no formulário e-mail/senha. Se não entrar, deixa a tela de login aberta e chama
+     * você (bip até Resolvido ou Pular). Pular bloqueia o portal nesta rodada. Na dúvida (a conferência falhou ou, depois
+     * do Resolvido, ainda não confirma o login) também chama você: só segue sem confirmar no segundo Resolvido.
+     */
+    private void conferirLogin(PortalDriver driver) {
+        registrar("trocando para " + driver.nome() + " — aguarde, conferindo o login");
+        Boolean logado = driver.logado();
+        if (logado == null) logado = driver.logado(); // falha passageira do navegador: confere de novo antes de chamar você
+        if (Boolean.TRUE.equals(logado)) {
+            registrar(driver.nome() + ": logado");
+            return;
+        }
+        if (logado == null) registrar(driver.nome() + ": não consegui confirmar o login — " + driver.diagnostico());
+        Tentativa t = tentarEntrar(driver);
+        if (t.logado()) return;
+        boolean celular = t.celular();
+        boolean viaLinkedin = t.viaLinkedin();
+        if (!celular) driver.abrirLogin(); // a conferência saiu da tela de login: volta para ela antes de chamar você
+        String motivo = celular
+                ? "o LinkedIn/Google mandou uma confirmação para o seu celular: aprove no celular e clique em Resolvido"
+                : driver.pedeCaptcha()
+                ? "o portal exige CAPTCHA: resolva e entre manualmente (marque \"lembrar-me\" para a sessão durar)"
+                : viaLinkedin ? "a tela do LinkedIn está aberta no Firefox: entre (ou autorize) e clique em Resolvido"
+                : "a tela de login está aberta no Firefox; o login digitado será salvo para entrar sozinho nas próximas vezes";
+        motivo = (logado == null ? "não consegui confirmar se está logado em " : "não logado em ") + driver.nome() + " — " + motivo;
+        for (int vez = 1; ; vez++) {
+            String[] digitado = {null, null};
+            String decisao = aguardar(new Chamado("LOGIN", driver.nome(), "início", motivo), () -> acumular(digitado, driver.lerLogin()));
+            if ("pular".equals(decisao)) {
+                bloqueados.add(driver.nome());
+                registrar(driver.nome() + " pulado nesta rodada");
+                return;
+            }
+            salvarLoginDigitado(viaLinkedin ? "LinkedIn" : driver.nome(), digitado); // digitado na tela do LinkedIn é login do LinkedIn
+            if (Boolean.TRUE.equals(driver.logado())) {
+                registrar(driver.nome() + ": logado");
+                return;
+            }
+            // a checagem pode errar: no segundo Resolvido segue de qualquer jeito, só avisa
+            if (vez >= 2) {
+                registrar(driver.nome() + ": ainda não confirmei o login — seguindo porque você confirmou; se a candidatura pedir login, chamo de novo");
+                return;
+            }
+            motivo = "ainda não consegui confirmar o login em " + driver.nome() + " (" + driver.diagnostico()
+                    + "). Confira na janela do Firefox; se já está logado, clique em Resolvido de novo para seguir";
+        }
+    }
+
+    /**
+     * Prefixo do motivo de pular quando o chamado não tem como virar formulário em Pendências; null se tem (ou se é
+     * ação manual no portal, como o teste da Sólides).
+     */
+    private static String semFormulario(String motivo) {
+        if (motivo.startsWith("sem resposta para:")) return "pulada pelo usuário: "; // você pulou ou descartou a pendência enquanto a vaga esperava
+        if (motivo.startsWith("dado sensível:")) return "pulada (dado sensível, não é salvo como resposta): ";
+        if (motivo.contains("ilegível")) return "pulada (campo sem pergunta legível): ";
+        return null;
     }
 
     private static boolean ehLogin(String motivo) {
@@ -241,11 +432,15 @@ public class Orquestrador {
         NavegadorFirefox navegador = new NavegadorFirefox();
         List<PortalDriver> drivers = new ArrayList<>();
         try {
-            for (String p : kv.get(KvRepo.CONFIG, "portais", "gupy").split(",")) {
-                if (p.isBlank()) continue;
-                Optional<PortalDriver> d = fabrica.criar(p, navegador);
+            // portais fixos (os de Portais e IA, na ordem de lá); sem login configurado o portal fica de fora
+            for (PortalRepo.Portal p : portais.todos()) {
+                if (!configurado(p)) {
+                    registrar(p.nome() + ": sem login configurado em Portais e IA — pulado");
+                    continue;
+                }
+                Optional<PortalDriver> d = fabrica.criar(p.chave(), navegador);
                 if (d.isPresent()) drivers.add(d.get());
-                else registrar("portal \"" + p.trim() + "\" ainda não é suportado — ignorado");
+                else registrar("portal \"" + p.nome() + "\" ainda não é suportado — ignorado");
             }
             boolean dryRun = Boolean.parseBoolean(kv.get(KvRepo.CONFIG, "dry_run", "true"));
             int max = kv.inteiro(KvRepo.CONFIG, "max_vagas", 30);
@@ -258,6 +453,8 @@ public class Orquestrador {
             bloqueados.clear();
             candidaturas.urlsProcessadas(dryRun).forEach(u -> feitas.add(ChaveVaga.de(u)));
             for (PortalDriver driver : drivers) {
+                if (!rodando) break;
+                conferirLogin(driver);
                 int novas = 0; // o limite de vagas novas vale por portal, somando todos os termos
                 for (String termo : kv.get(KvRepo.PREF, "termos", "").split(",")) {
                     if (!rodando || termo.isBlank() || bloqueados.contains(driver.nome()) || novas >= max) continue;
@@ -379,7 +576,7 @@ public class Orquestrador {
         int tentativasLogin = 0;
         String ultimoMotivo = null;
         int repetidos = 0;
-        boolean pulouPorRepeticao = false;
+        String prefixo = null; // motivo de a vaga ser pulada sem a decisão do usuário
         while (true) {
             try {
                 d = driver.candidatar(v, cv.get(), kv.booleano(KvRepo.CONFIG, "dry_run", true), () -> rodando); // lê a cada tentativa: o checkbox vale na hora
@@ -397,23 +594,39 @@ public class Orquestrador {
             ultimoMotivo = d.motivo();
             if (repetidos >= 1 && !pedeLogin(d.motivo())) {
                 pulouChamado = true;
-                pulouPorRepeticao = true;
+                prefixo = "pulada (pendência repetida): ";
                 break;
             }
-            // login pedido no meio da busca: entra sozinho com o login salvo (até 2 tentativas por vaga)
+            // login pedido no meio da busca: entra sozinho na mesma ordem do início (até 2 tentativas por vaga)
             boolean captchaNoLogin = false;
-            if (pedeLogin(d.motivo()) && tentativasLogin < 2 && entrarAutomatico(driver)) {
+            boolean celularNoLogin = false;
+            if (pedeLogin(d.motivo()) && tentativasLogin < 2) {
                 tentativasLogin++;
-                captchaNoLogin = driver.pedeCaptcha();
-                if (!captchaNoLogin) continue;
-                registrar(driver.nome() + " exige CAPTCHA no login — o login automático não adianta");
+                Tentativa t = tentarEntrar(driver);
+                if (t.logado()) continue;
+                celularNoLogin = t.celular();
+                captchaNoLogin = !celularNoLogin && driver.pedeCaptcha();
+                if (captchaNoLogin) registrar(driver.nome() + " exige CAPTCHA no login — o login automático não adianta");
+            }
+            boolean login = pedeLogin(d.motivo());
+            // sem formulário possível em Pendências, chamar você não adianta: a vaga recomeçaria do zero e pararia no mesmo campo
+            String semFormulario = ehLogin(d.motivo()) ? null : semFormulario(d.motivo());
+            if (semFormulario != null) {
+                pulouChamado = true;
+                prefixo = semFormulario;
+                break;
             }
             candidaturas.atualizarStatus(id, "aguardando_usuario", d.motivo());
-            boolean login = pedeLogin(d.motivo());
-            String tipo = ehLogin(d.motivo()) ? "LOGIN" : "PENDENCIA";
+            long pendencia = ehLogin(d.motivo()) ? 0
+                    : situacoes.abrirPendencia(driver.nome(), d.motivo(), rotulo + "\n\n" + (v.descricao() == null ? "" : v.descricao()));
+            String tipo = ehLogin(d.motivo()) ? "LOGIN" : pendencia > 0 ? "PENDENCIA" : "MANUAL";
             String motivo = d.motivo();
+            if (pendencia > 0) motivo += " — escolha a resposta certa em Pendências; a vaga segue sozinha quando você salvar";
+            if (tipo.equals("MANUAL")) motivo += " — resolva na janela do Firefox do robô e clique em Resolvido";
             if (login) {
-                motivo += captchaNoLogin
+                motivo += celularNoLogin
+                        ? " — o LinkedIn/Google mandou uma confirmação para o seu celular: aprove no celular e clique em Resolvido"
+                        : captchaNoLogin
                         ? " — o portal exige CAPTCHA: resolva e entre manualmente (marque \"lembrar-me\" para a sessão durar)"
                         : tentativasLogin > 0
                         ? " — o login automático não funcionou; entre manualmente (o novo login será salvo)"
@@ -421,7 +634,8 @@ public class Orquestrador {
             }
             String[] digitado = {null, null};
             Runnable capturar = login ? () -> acumular(digitado, driver.lerLogin()) : () -> { };
-            String decisao = aguardar(new Chamado(tipo, driver.nome(), rotulo, motivo), capturar);
+            String decisao = aguardar(new Chamado(tipo, driver.nome(), rotulo, motivo), capturar,
+                    pendencia > 0 ? () -> situacoes.pendenciaFechada(pendencia) : () -> false);
             if (login && "continuar".equals(decisao)) salvarLoginDigitado(driver.nome(), digitado);
             if ("pular".equals(decisao)) {
                 pulouChamado = true;
@@ -436,7 +650,7 @@ public class Orquestrador {
                 candidaturas.atualizarStatus(id, "aguardando_usuario", d.motivo());
             } else {
                 candidaturas.atualizarStatus(id, "pulada",
-                        (pulouPorRepeticao ? "pulada (pendência repetida): "
+                        (prefixo != null ? prefixo
                                 : kv.booleano(KvRepo.CONFIG, "nao_interagir", false) ? "pulada (não interagir): "
                                 : "pulada pelo usuário: ") + d.motivo());
                 puladas.incrementAndGet();

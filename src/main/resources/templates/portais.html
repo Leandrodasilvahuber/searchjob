@@ -1,0 +1,125 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="pt-BR">
+<head th:replace="~{layout :: head('Portais e IA')}"></head>
+<body>
+<nav th:replace="~{layout :: menu(${pagina})}"></nav>
+<style>
+  .modos { display:inline-flex; border:1px solid var(--bd); border-radius:999px; overflow:hidden; }
+  .modos label { padding:5px 12px; cursor:pointer; font-size:13px; font-weight:700; }
+  .modos label + label { border-left:1px solid var(--bd); }
+  .modos input { display:none; }
+  .modos label:has(input:checked) { background:var(--ac); color:#fff; }
+  .portal { display:grid; grid-template-columns:130px auto 1fr 1fr auto; gap:10px; align-items:center; padding:10px 0; border-top:1px solid var(--bd); }
+  .portal:first-of-type { border-top:0; }
+  .ia { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px 12px; padding:12px 0; border-top:1px solid var(--bd); }
+  .ia:first-of-type { border-top:0; }
+  .ia label { font-size:12px; font-weight:700; color:var(--mut); display:flex; flex-direction:column; gap:3px; }
+  .ia .largo { grid-column:span 2; } .ia .todo { grid-column:1 / -1; }
+  .ia input[type=number] { width:100%; }
+  .erro { border-color:var(--bad); color:var(--bad); }
+  @media (max-width:800px) { .portal { grid-template-columns:1fr; } .ia { grid-template-columns:1fr 1fr; } }
+</style>
+<main>
+  <h1>Portais e IA</h1>
+  <div class="card erro" th:if="${param.erro}" th:text="${param.erro}"></div>
+
+  <div class="card" id="portais">
+    <b>🌐 Login dos portais</b>
+    <p class="mut">O robô tenta primeiro o modo marcado e, se não entrar, os outros (Google → LinkedIn → e-mail e senha do portal).
+      Só chama você se nada entrar, se houver CAPTCHA ou confirmação no celular. Senhas cifradas (AES-256) no banco local; nunca aparecem aqui.
+      Senha em branco mantém a atual. A busca passa por todos estes portais; o que não tiver login (nem a conta Google/LinkedIn
+      do modo marcado) é pulado.</p>
+    <form th:each="p : ${portais}" th:id="'portal-' + ${p.chave}" class="portal" method="post" th:action="@{/portais/{c}(c=${p.chave})}">
+      <b th:text="${p.nome}"></b>
+      <span class="modos">
+        <label><input type="radio" name="modo" value="google" th:checked="${p.modoLogin=='google'}">Google</label>
+        <label><input type="radio" name="modo" value="linkedin" th:checked="${p.modoLogin=='linkedin'}">LinkedIn</label>
+        <label><input type="radio" name="modo" value="portal" th:checked="${p.modoLogin=='portal'}">Portal</label>
+      </span>
+      <input type="text" name="usuario" th:value="${usuarios[p.chave]}" placeholder="e-mail / usuário" autocomplete="off">
+      <input type="password" name="senha" autocomplete="new-password"
+             th:placeholder="${usuarios[p.chave] != null} ? 'senha salva — digite para trocar' : 'senha'">
+      <button>Salvar</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <b>🔐 Contas Google e LinkedIn</b>
+    <p class="mut">A conta Google é escolhida no "Entrar com Google" de qualquer portal; o login do LinkedIn (linha LinkedIn acima)
+      é o usado no "Entrar com LinkedIn".</p>
+    <form th:action="@{/portais/conta-google}" method="post" class="row">
+      <span style="width:130px"><b>Google</b></span>
+      <input type="text" name="usuario" th:value="${usuarios['google']}" placeholder="e-mail da conta Google" autocomplete="off" style="flex:1">
+      <input type="password" name="senha" autocomplete="new-password" style="flex:1"
+             th:placeholder="${usuarios['google'] != null} ? 'senha salva — digite para trocar' : 'senha'">
+      <button>Salvar</button>
+    </form>
+  </div>
+
+  <div class="card" id="ia">
+    <b>🤖 Provedores de IA</b>
+    <p class="mut">Tentados por ordem (menor primeiro); dentro de cada um, os modelos na ordem da lista. Inativo, sem chave ou sem
+      modelos fica fora do fallback; com um só configurado, ele atende tudo. Qualquer API compatível com OpenAI (chat/completions) serve.</p>
+    <form th:each="v : ${provedores}" class="ia" method="post" th:action="@{/ia}">
+      <input type="hidden" name="id" th:value="${v.id}">
+      <label>Nome<input type="text" name="nome" th:value="${v.nome}" required></label>
+      <label class="largo">URL<input type="text" name="url" th:value="${v.url}" required></label>
+      <label>Chave<input type="password" name="chave" autocomplete="new-password"
+             th:placeholder="${v.temChave} ? 'salva — digite para trocar' : 'sem chave'"></label>
+      <label class="todo">Modelos (separados por vírgula)<input type="text" name="modelos" th:value="${v.modelos}"></label>
+      <label>Ordem<input type="number" name="ordem" th:value="${v.ordem}"></label>
+      <label>Intervalo entre chamadas (ms)<input type="number" name="intervaloMs" min="0" th:value="${v.intervaloMs}"></label>
+      <label>Prazo por chamada (s)<input type="number" name="timeoutS" min="1" th:value="${v.timeoutS}"></label>
+      <label>Tentativas por modelo<input type="number" name="tentativas" min="1" th:value="${v.tentativas}"></label>
+      <div class="row todo">
+        <label class="row" style="flex-direction:row"><input type="checkbox" name="ativo" value="true" th:checked="${v.ativo}"> ativo</label>
+        <span class="tag" th:classappend="${v.ativo and v.temChave and !#strings.isEmpty(v.modelos)} ? 'ativa' : 'inativa'"
+              th:text="${v.ativo and v.temChave and !#strings.isEmpty(v.modelos)} ? 'no fallback' : (${!v.temChave} ? 'sem chave' : (${#strings.isEmpty(v.modelos)} ? 'sem modelos' : 'inativo'))"></span>
+        <span style="flex:1"></span>
+        <button>Salvar</button>
+        <button class="del" formaction="#" th:formaction="@{/ia/{id}/excluir(id=${v.id})}"
+                onclick="return confirm('Excluir este provedor?')">Excluir</button>
+      </div>
+    </form>
+    <details style="margin-top:8px">
+      <summary><b>Novo provedor</b></summary>
+      <form class="ia" method="post" th:action="@{/ia}">
+        <label>Nome<input type="text" name="nome" required></label>
+        <label class="largo">URL<input type="text" name="url" placeholder="https://.../v1/chat/completions" required></label>
+        <label>Chave<input type="password" name="chave" autocomplete="new-password"></label>
+        <label class="todo">Modelos (separados por vírgula)<input type="text" name="modelos"></label>
+        <label>Ordem<input type="number" name="ordem" th:value="${provedores.size()}"></label>
+        <label>Intervalo entre chamadas (ms)<input type="number" name="intervaloMs" min="0" value="3000"></label>
+        <label>Prazo por chamada (s)<input type="number" name="timeoutS" min="1" value="180"></label>
+        <label>Tentativas por modelo<input type="number" name="tentativas" min="1" value="1"></label>
+        <div class="row todo">
+          <label class="row" style="flex-direction:row"><input type="checkbox" name="ativo" value="true" checked> ativo</label>
+          <span style="flex:1"></span><button>Adicionar</button>
+        </div>
+      </form>
+    </details>
+  </div>
+
+  <div class="card" id="contas">
+    <b>👥 Todas as contas salvas</b>
+    <p class="mut">Com mais de uma conta no mesmo portal, o robô usa a ativa. Contas digitadas por você na tela de login durante a busca também aparecem aqui.</p>
+    <table>
+      <tr><th>Portal</th><th>Usuário</th><th>Conta</th><th style="width:210px"></th></tr>
+      <tr th:if="${contas.isEmpty()}"><td colspan="4" class="mut">Nenhum login salvo.</td></tr>
+      <tr th:each="c : ${contas}">
+        <td><b th:text="${c.portal}"></b></td>
+        <td th:text="${c.usuario}"></td>
+        <td><span class="tag" th:classappend="${c.ativa} ? 'ativa' : 'inativa'" th:text="${c.ativa} ? 'ativa' : 'inativa'"></span></td>
+        <td>
+          <form method="post" class="row" th:action="@{/credenciais/{id}/ativar(id=${c.id})}">
+            <button class="sec" th:unless="${c.ativa}">Usar esta</button>
+            <button class="del" formaction="#" th:formaction="@{/credenciais/{id}/excluir(id=${c.id})}"
+                    onclick="return confirm('Excluir este login?')">Excluir</button>
+          </form>
+        </td>
+      </tr>
+    </table>
+  </div>
+</main>
+</body>
+</html>

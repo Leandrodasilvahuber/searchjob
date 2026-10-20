@@ -21,6 +21,9 @@ public class FabricaDrivers {
             case "gupy" -> new GupyDriver(navegador, situacoes);
             case "programathor" -> new ProgramaThorDriver(navegador, situacoes);
             case "catho" -> new CathoDriver(navegador, situacoes);
+            case "solides" -> new SolidesDriver(navegador, situacoes,
+                    kv.get(KvRepo.CONFIG, "solides_habilidades_base", SolidesDriver.HABILIDADES_BASE),
+                    kv.inteiro(KvRepo.PREF, "recencia_dias", 14));
             case "linkedin" -> new LinkedInDriver(navegador, situacoes);
             case "indeed" -> new IndeedDriver(navegador, situacoes, kv.inteiro(KvRepo.PREF, "recencia_dias", 14));
             default -> null;

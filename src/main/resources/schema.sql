@@ -53,3 +53,28 @@ CREATE TABLE IF NOT EXISTS credencial (
   atualizado_em TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (portal, usuario)
 );
+-- portais e como o robô entra em cada um: google | linkedin | portal (e-mail e senha do próprio portal)
+CREATE TABLE IF NOT EXISTS portal (
+  chave TEXT PRIMARY KEY,
+  nome TEXT NOT NULL,
+  modo_login TEXT NOT NULL DEFAULT 'google',
+  ordem INTEGER NOT NULL DEFAULT 0
+);
+-- provedores de IA (API compatível com OpenAI), tentados por ordem; sem chave, inativo ou sem modelos fica fora do fallback
+CREATE TABLE IF NOT EXISTS ia_provedor (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nome TEXT NOT NULL UNIQUE,
+  url TEXT NOT NULL,
+  chave_cifrada TEXT NOT NULL DEFAULT '',
+  modelos TEXT NOT NULL DEFAULT '',
+  ordem INTEGER NOT NULL DEFAULT 0,
+  ativo INTEGER NOT NULL DEFAULT 1,
+  intervalo_ms INTEGER NOT NULL DEFAULT 3000,
+  timeout_s INTEGER NOT NULL DEFAULT 120,
+  tentativas INTEGER NOT NULL DEFAULT 1
+);
+-- instrução extra de cada modelo de IA, enviada junto com todo pedido a ele (corrige manias do modelo)
+CREATE TABLE IF NOT EXISTS ia_modelo_prompt (
+  modelo TEXT PRIMARY KEY,
+  prompt TEXT NOT NULL DEFAULT ''
+);

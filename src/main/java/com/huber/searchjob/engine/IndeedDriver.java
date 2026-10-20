@@ -91,6 +91,17 @@ public class IndeedDriver extends PortalWebDriver {
         return Boolean.TRUE.equals(r);
     }
 
+    /** Deslogado, redireciona para secure.indeed.com/auth. */
+    @Override
+    protected String paginaLogada() {
+        return "https://myjobs.indeed.com/";
+    }
+
+    @Override
+    protected String paginaLogin() {
+        return "https://secure.indeed.com/auth";
+    }
+
     @Override
     protected Optional<Desfecho> casoEspecial(WebDriver d, String corpo) {
         boolean simplificada = !d.findElements(By.cssSelector("#indeedApplyButton, [id*=indeedApply], button[aria-label*='Candidatura simplificada' i]")).isEmpty()

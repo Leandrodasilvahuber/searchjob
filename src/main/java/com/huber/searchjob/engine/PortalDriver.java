@@ -20,6 +20,37 @@ public interface PortalDriver {
         return false;
     }
 
+    /**
+     * Abre no navegador uma página que só existe com a sessão ativa e diz se está logado. Null se o portal não sabe
+     * conferir (ex.: busca e candidatura sem conta) ou se o navegador falhou.
+     */
+    default Boolean logado() {
+        return null;
+    }
+
+    /**
+     * Abre a tela de login do portal no navegador, preferindo "Entrar com LinkedIn" quando existe. Devolve true se
+     * clicou no LinkedIn; false se ficou no formulário do portal (ou se o portal não tem tela de login).
+     */
+    default boolean abrirLogin() {
+        return false;
+    }
+
+    /** True se o LinkedIn/Google está pedindo confirmação no celular (só o usuário resolve). */
+    default boolean pedeCelular() {
+        return false;
+    }
+
+    /** Na tela de login aberta, entra por "Entrar com Google" com a conta {@code email}. False se não há o botão. */
+    default boolean entrarComGoogle(String email) {
+        return false;
+    }
+
+    /** Abre a tela de login do portal sem clicar no LinkedIn (formulário e-mail/senha). False se o portal não tem. */
+    default boolean abrirFormularioLogin() {
+        return false;
+    }
+
     /** True se a página aberta no navegador mostra CAPTCHA (o login automático não adianta). */
     default boolean pedeCaptcha() {
         return false;
@@ -28,6 +59,11 @@ public interface PortalDriver {
     /** Descrição curta da página aberta (URL e avisos), para diagnosticar um login que não entrou. */
     default String diagnostico() {
         return "";
+    }
+
+    /** Preenche o login da página aberta agora (ex.: a do LinkedIn, vinda de "Entrar com LinkedIn"), sem navegar antes. */
+    default boolean entrarNaPaginaAberta(String usuario, String senha) {
+        return false;
     }
 
     /** Valores digitados agora no formulário de login do navegador: {usuário, senha} (null onde vazio). */

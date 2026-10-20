@@ -1,0 +1,36 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="pt-BR">
+<head th:replace="~{layout :: head('Prompts dos modelos')}"></head>
+<body>
+<nav th:replace="~{layout :: menu(${pagina})}"></nav>
+<style>
+  .modelo { display:flex; flex-direction:column; gap:8px; padding:12px 0; border-top:1px solid var(--bd); }
+  .modelo:first-of-type { border-top:0; }
+  .modelo textarea { width:100%; min-height:110px; font-family:inherit; }
+  .erro { border-color:var(--bad); color:var(--bad); }
+  .ok { color:var(--ok, var(--ac)); font-weight:700; }
+</style>
+<main>
+  <h1>Prompts dos modelos</h1>
+  <p class="mut lead">Instrução extra de cada modelo, enviada junto com <b>todo</b> pedido a ele (busca, pendências e
+    🧪 Testar textos). Serve para corrigir manias do modelo, como devolver dois valores na pretensão salarial.
+    Em branco, o modelo recebe só o pedido normal. Os modelos vêm dos provedores em <a th:href="@{/portais#ia}">Portais e IA</a>.</p>
+  <div class="card erro" th:if="${param.erro}" th:text="${param.erro}"></div>
+
+  <div class="card">
+    <p class="mut" th:if="${prompts.isEmpty()}">Nenhum modelo cadastrado nos provedores de IA.</p>
+    <form th:each="e : ${prompts}" class="modelo" method="post" th:action="@{/prompts}" th:id="'m-' + ${e.key}">
+      <input type="hidden" name="modelo" th:value="${e.key}">
+      <div class="row"><b th:text="${e.key}"></b>
+        <span class="ok" th:if="${param.salvo != null and param.salvo[0] == e.key}">✓ salvo</span></div>
+      <textarea name="prompt" th:text="${e.value}" placeholder="sem instrução extra"></textarea>
+      <div class="row">
+        <button>Salvar</button>
+        <button type="button" class="sec" th:attr="data-padrao=${padrao}"
+                onclick="this.form.prompt.value = this.dataset.padrao">Restaurar padrão</button>
+      </div>
+    </form>
+  </div>
+</main>
+</body>
+</html>

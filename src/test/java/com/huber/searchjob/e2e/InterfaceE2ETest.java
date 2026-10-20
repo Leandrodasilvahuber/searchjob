@@ -7,6 +7,9 @@ import static org.mockito.Mockito.verify;
 
 import com.huber.searchjob.BaseIT;
 import com.huber.searchjob.db.CandidaturaRepo;
+import com.huber.searchjob.db.CredencialRepo;
+import com.huber.searchjob.db.IaProvedorRepo;
+import com.huber.searchjob.db.PortalRepo;
 import com.huber.searchjob.db.CvRepo;
 import com.huber.searchjob.db.KvRepo;
 import com.huber.searchjob.db.Situacao;
@@ -32,6 +35,9 @@ class InterfaceE2ETest extends BaseIT {
     @Autowired CvRepo cvs;
     @Autowired KvRepo kv;
     @Autowired CandidaturaRepo repo;
+    @Autowired IaProvedorRepo provedores;
+    @Autowired PortalRepo portais;
+    @Autowired CredencialRepo credenciais;
     private Http http;
 
     @BeforeEach
@@ -42,7 +48,7 @@ class InterfaceE2ETest extends BaseIT {
     @Test
     void todasAsTelasCarregam() throws Exception {
         for (String p : new String[] {"/", "/pendencias", "/historico", "/situacoes", "/textos", "/cvs",
-                "/kv/dado_fixo", "/kv/preferencia", "/kv/config"}) {
+                "/kv/dado_fixo", "/kv/preferencia", "/kv/config", "/portais"}) {
             var r = http.get(p);
             assertEquals(200, r.status(), p);
             assertTrue(r.corpo().contains("Encerrar serviço"), "menu com o botão de encerrar em " + p);
@@ -92,11 +98,45 @@ class InterfaceE2ETest extends BaseIT {
     }
 
     @Test
-    void configuracaoFallbackDryRunEChaveSecreta() throws Exception {
-        http.post("/fallback/zai", Map.of("ligado", "false"));
-        assertEquals("false", kv.get(KvRepo.CONFIG, "fallback_zai", ""));
-        http.post("/fallback/zai", Map.of("ligado", "true"));
-        assertEquals("true", kv.get(KvRepo.CONFIG, "fallback_zai", ""));
+    void provedorDeIaComChaveCifradaQueNaoVoltaParaATela() throws Exception {
+        http.post("/ia", Map.of("nome", "IA E2E", "url", "http://127.0.0.1:1/v1", "chave", "SEGREDO-IA", "modelos", "m1, m2,",
+                "ordem", "9", "ativo", "true"));
+        IaProvedorRepo.Provedor p = provedores.todos().stream().filter(x -> x.nome().equals("IA E2E")).findFirst().orElseThrow();
+        assertEquals("SEGREDO-IA", p.chave());
+        assertEquals(java.util.List.of("m1", "m2"), p.modelos());
+        assertTrue(p.utilizavel());
+        long id = p.id();
+        assertFalse(http.get("/portais").corpo().contains("SEGREDO-IA"));
+        assertFalse(http.get("/").corpo().contains("SEGREDO-IA"));
+
+        http.post("/ia", Map.of("id", String.valueOf(id), "nome", "IA E2E", "url", "http://127.0.0.1:1/v1", "chave", "",
+                "modelos", "m1", "ordem", "9"));
+        IaProvedorRepo.Provedor salvo = provedores.todos().stream().filter(x -> x.id() == id).findFirst().orElseThrow();
+        assertEquals("SEGREDO-IA", salvo.chave(), "chave em branco mantém a atual");
+        assertFalse(salvo.ativo(), "checkbox desmarcado desativa");
+        http.post("/ia/" + id + "/ativo", Map.of("ligado", "true"));
+        assertTrue(provedores.todos().stream().anyMatch(x -> x.id() == id && x.ativo()));
+        http.post("/ia/" + id + "/excluir", Map.of());
+        assertTrue(provedores.todos().stream().noneMatch(x -> x.nome().equals("IA E2E")));
+    }
+
+    @Test
+    void portalGuardaModoDeLoginEContaAtiva() throws Exception {
+        http.post("/portais/catho", Map.of("modo", "portal", "usuario", "e2e@x.com", "senha", "SENHA-E2E"));
+        assertEquals(PortalRepo.PORTAL, portais.modo("Catho"));
+        assertEquals("SENHA-E2E", credenciais.ativa("catho").orElseThrow().senha());
+        http.post("/portais/conta-google", Map.of("usuario", "g@x.com", "senha", "G-E2E"));
+        assertEquals("g@x.com", credenciais.ativa("google").orElseThrow().usuario());
+        String tela = http.get("/portais").corpo();
+        assertTrue(tela.contains("e2e@x.com"));
+        assertFalse(tela.contains("SENHA-E2E") || tela.contains("G-E2E"));
+        http.post("/portais/catho", Map.of("modo", "google"));
+        assertEquals(PortalRepo.GOOGLE, portais.modo("catho"));
+        assertEquals("e2e@x.com", credenciais.ativa("catho").orElseThrow().usuario(), "trocar só o modo mantém a conta");
+    }
+
+    @Test
+    void configuracaoDryRunEChaveSecreta() throws Exception {
         http.post("/dryrun", Map.of("ligado", "false"));
         assertEquals("false", kv.get(KvRepo.CONFIG, "dry_run", ""));
         http.post("/dryrun", Map.of("ligado", "true"));

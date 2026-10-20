@@ -3,6 +3,7 @@ package com.huber.searchjob.engine;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -25,7 +26,18 @@ public class ProgramaThorDriver extends PortalWebDriver {
     @Override
     public List<Vaga> buscar(String termo, int max) throws Exception {
         String slug = URLEncoder.encode(Texto.normalizar(termo).replace(' ', '-'), StandardCharsets.UTF_8);
-        return parse(get("https://programathor.com.br/jobs-" + slug), max);
+        // a listagem não traz data e mistura vagas em destaque antigas: o id é sequencial, então id maior = mais nova
+        List<Vaga> out = new ArrayList<>(parse(get("https://programathor.com.br/jobs-" + slug), Integer.MAX_VALUE));
+        out.sort(Comparator.comparingLong((Vaga v) -> numero(v.id())).reversed());
+        return out.size() > max ? new ArrayList<>(out.subList(0, max)) : out;
+    }
+
+    private static long numero(String id) {
+        try {
+            return Long.parseLong(id);
+        } catch (NumberFormatException e) {
+            return 0; // id fora do padrão vai para o fim
+        }
     }
 
     static List<Vaga> parse(String html, int max) {
@@ -66,6 +78,17 @@ public class ProgramaThorDriver extends PortalWebDriver {
         navegador.driver().get("https://programathor.com.br/users/sign_in");
         pausa(1500);
         return super.entrar(usuario, senha);
+    }
+
+    /** Edição da conta: deslogado, redireciona para /users/sign_in. */
+    @Override
+    protected String paginaLogada() {
+        return "https://programathor.com.br/users/edit";
+    }
+
+    @Override
+    protected String paginaLogin() {
+        return "https://programathor.com.br/users/sign_in";
     }
 
     @Override

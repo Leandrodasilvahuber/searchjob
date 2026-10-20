@@ -40,6 +40,7 @@
     <div class="row">
       <form id="f-iniciar" th:action="@{/iniciar}" method="post" th:hidden="${estado.rodando}" onsubmit="return iaOk()"><button>▶ Iniciar busca</button></form>
       <form id="f-parar" th:action="@{/parar}" method="post" th:hidden="${!estado.rodando}"><button class="del">■ Parar</button></form>
+      <button type="button" id="b-teste" class="sec">🧪 Testar textos</button>
       <span class="tag" id="estado" th:text="${estado.rodando} ? 'rodando' : 'parado'">parado</span>
       <span class="mut" id="msg" th:text="${estado.mensagem}"></span>
     </div>
@@ -55,13 +56,14 @@
     <ul id="log" class="log"></ul>
   </div>
   <div class="card opcoes">
-    <b>🤖 Fallback da IA</b>
-    <p class="mut">OpenRouter primeiro; se ligada, a Z.ai entra quando ele falhar.</p>
-    <form th:action="@{/fallback/zai}" method="post" class="row">
-      <span>Z.ai (glm-4.5-flash)</span>
-      <span class="tag" th:classappend="${fallbackZai} ? 'ativa' : 'inativa'" th:text="${fallbackZai} ? 'ativo' : 'desativado'">ativo</span>
-      <input type="hidden" name="ligado" th:value="${!fallbackZai}">
-      <button id="b-zai" th:classappend="${fallbackZai} ? 'del'" th:text="${fallbackZai} ? 'Desativar Z.ai' : 'Ativar Z.ai'">Desativar Z.ai</button>
+    <b>🤖 Fallback da IA</b> <a class="mut" th:href="@{/portais#ia}">configurar</a>
+    <p class="mut">Tentados nesta ordem; sem chave ou desativado fica de fora.</p>
+    <form th:each="v : ${provedores}" th:action="@{/ia/{id}/ativo(id=${v.id})}" method="post" class="row">
+      <span th:text="${v.nome}">OpenRouter</span>
+      <span class="tag" th:classappend="${v.ativo and v.temChave} ? 'ativa' : 'inativa'"
+            th:text="${!v.temChave} ? 'sem chave' : (${v.ativo} ? 'ativo' : 'desativado')">ativo</span>
+      <input type="hidden" name="ligado" th:value="${!v.ativo}">
+      <button th:if="${v.temChave}" th:classappend="${v.ativo} ? 'del'" th:text="${v.ativo} ? 'Desativar' : 'Ativar'">Desativar</button>
     </form>
     <hr>
     <b>🎛️ Opções</b>
@@ -87,6 +89,20 @@
       <h2>🤖 Aviso da IA</h2>
       <p id="sem-ia-texto"></p>
       <button id="sem-ia-fechar">Fechar</button>
+    </div>
+  </div>
+  <div id="teste" class="modal" hidden>
+    <div class="caixa teste">
+      <div class="t-topo">
+        <h2>🧪 Testar textos da IA</h2>
+        <p class="mut">As 10 perguntas mais comuns nas vagas, respondidas com o mesmo pedido da busca, só pelo modelo escolhido
+          (sem fallback, sem atalho das respostas salvas e sem gravar nada).</p>
+        <div class="row" id="t-modelos"></div>
+        <div class="row"><button type="button" id="t-limpar" class="sec">🧹 Limpar</button>
+          <button type="button" id="t-fechar" class="sec">Fechar</button><span class="mut" id="t-status"></span></div>
+      </div>
+      <details><summary class="mut">Vaga usada no teste (editável)</summary><textarea id="t-vaga" rows="6"></textarea></details>
+      <form id="t-form" onsubmit="return false"></form>
     </div>
   </div>
   <div id="modal" class="modal" hidden>
@@ -166,10 +182,21 @@
   .modal[hidden] { display:none; }
   .modal .caixa { background:var(--card); border:2px solid var(--bad); border-radius:var(--r); padding:20px; max-width:720px; width:calc(100% - 32px); max-height:85vh; overflow:auto; }
   .modal h2 { margin:0 0 8px; font-size:20px; }
+  .modal .caixa.teste { border-color:var(--ac); max-width:960px; padding-top:0; }
+  .t-topo { position:sticky; top:0; z-index:1; background:var(--card); padding:16px 0 10px; border-bottom:1px solid var(--bd); }
+  .t-topo p { margin:0 0 10px; font-size:14px; } .t-topo .row + .row { margin-top:8px; }
+  .t-q { padding:12px 0; border-bottom:1px solid var(--bd); }
+  .t-q > label { display:block; font-weight:700; margin-bottom:6px; }
+  .t-q .tipo { margin-left:6px; }
+  .t-q .ops label { display:inline-flex; gap:6px; align-items:center; margin:0 14px 4px 0; font-weight:400; }
+  .t-q .nota { font-size:13px; color:var(--mut); margin-top:4px; }
+  .t-q .nota.erro { color:var(--bad); }
+  #t-status.erro { color:var(--bad); font-weight:700; }
+  .t-q ul { margin:6px 0 0; padding-left:18px; font-size:13px; } .t-q li b { color:var(--ac); }
 </style>
 <script th:inline="javascript">
   let antes = /*[[${pendencias}]]*/ 0;
-  const SEM_IA = 'Nenhuma IA configurada: cadastre a chave do OpenRouter em Config ou ligue o fallback Z.ai. A busca não vai rodar.';
+  const SEM_IA = 'Nenhuma IA configurada: cadastre a chave de um provedor em Portais e IA. A busca não vai rodar.';
   function avisarSemIa(texto) {
     document.getElementById('sem-ia-texto').textContent = texto;
     document.getElementById('sem-ia').hidden = false;
@@ -219,11 +246,12 @@
     $('impedimento').hidden = !c;
     if (!c) return;
     const login = c.tipo === 'LOGIN';
-    $('imp-titulo').textContent = login ? '🔐 Login necessário em ' + c.portal : '📝 Pendência em ' + c.portal;
+    const pendencia = c.tipo === 'PENDENCIA';
+    $('imp-titulo').textContent = (login ? '🔐 Login necessário em ' : pendencia ? '📝 Pendência em ' : '✋ Ação manual em ') + c.portal;
     $('imp-texto').textContent = (c.vaga ? c.vaga + ' — ' : '') + c.motivo
       + (login ? '. Faça login na janela do Firefox do robô e clique em Resolvido.' : '.');
     $('imp-pular').textContent = login ? 'Pular portal' : 'Pular vaga';
-    $('imp-abrir').hidden = login;
+    $('imp-abrir').hidden = !pendencia; // só a pendência tem formulário em Pendências
   }
   async function atualizar() {
     try {
@@ -247,6 +275,137 @@
   }
   atualizar();
   setInterval(atualizar, 2000);
+
+  // --- teste de textos: as perguntas mais comuns das vagas, respondidas por um modelo de cada vez ---
+  const VAGA_TESTE = 'Empresa Exemplo — Desenvolvedor Full Stack Sênior\nContratação: CLT ou PJ, remoto.\n'
+    + 'Requisitos: Java com Spring Boot, Node.js/TypeScript, React, PostgreSQL, Docker e AWS. Desejável: Kubernetes, mensageria (Kafka ou RabbitMQ) e testes automatizados.\n'
+    + 'Atividades: desenvolver e manter microsserviços, participar de decisões de arquitetura, revisar código e apoiar devs mais novos.';
+  const PERGUNTAS = [
+    { p: 'Qual a sua pretensão salarial?', tipo: 'texto' },
+    { p: 'Quantos anos de experiência você tem com Java?', tipo: 'texto' },
+    { p: 'Qual o seu nível de inglês?', tipo: 'escolha', opcoes: ['Básico', 'Intermediário', 'Avançado', 'Fluente'] },
+    { p: 'Você tem disponibilidade para trabalhar no modelo híbrido?', tipo: 'escolha', opcoes: ['Sim', 'Não'] },
+    { p: 'Qual modelo de contratação você prefere?', tipo: 'escolha', opcoes: ['CLT', 'PJ', 'Tanto faz'], select: true },
+    { p: 'Quais destas tecnologias você já usou profissionalmente?', tipo: 'multipla', opcoes: ['Docker', 'Java', 'Kubernetes', 'Node.js', 'Python', 'React'] },
+    { p: 'Link do seu perfil no LinkedIn', tipo: 'texto' },
+    { p: 'Fale um pouco sobre você e sua trajetória profissional.', tipo: 'area' },
+    { p: 'Por que você quer trabalhar conosco?', tipo: 'area' },
+    { p: 'Descreva um projeto desafiador em que você atuou e qual foi o resultado.', tipo: 'area' },
+  ];
+  const TIPO = { texto: 'texto curto', area: 'texto livre', escolha: 'escolha única', multipla: 'múltipla escolha' };
+  let testeAbort = null;
+  const norm = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  function montarTeste() {
+    $('t-vaga').value = VAGA_TESTE;
+    const f = $('t-form'); f.textContent = '';
+    PERGUNTAS.forEach((q, i) => {
+      const d = document.createElement('div'); d.className = 't-q';
+      const l = document.createElement('label'); l.textContent = (i + 1) + '. ' + q.p;
+      const tg = document.createElement('span'); tg.className = 'tipo'; tg.textContent = TIPO[q.tipo]; l.appendChild(tg);
+      d.appendChild(l);
+      if (q.select) {
+        const s = document.createElement('select'); s.name = 'q' + i;
+        ['', ...q.opcoes].forEach(o => { const op = document.createElement('option'); op.value = o; op.textContent = o || '— selecione —'; s.appendChild(op); });
+        d.appendChild(s);
+      } else if (q.opcoes) {
+        const ops = document.createElement('div'); ops.className = 'ops';
+        q.opcoes.forEach(o => {
+          const lb = document.createElement('label'); const inp = document.createElement('input');
+          inp.type = q.tipo === 'multipla' ? 'checkbox' : 'radio'; inp.name = 'q' + i; inp.value = o;
+          lb.append(inp, o); ops.appendChild(lb);
+        });
+        d.appendChild(ops);
+      } else {
+        const c = document.createElement(q.tipo === 'area' ? 'textarea' : 'input'); c.name = 'q' + i;
+        if (q.tipo !== 'area') c.type = 'text'; else c.rows = 3;
+        d.appendChild(c);
+      }
+      const n = document.createElement('div'); n.className = 'nota'; d.appendChild(n);
+      d.appendChild(document.createElement('ul'));
+      f.appendChild(d);
+    });
+  }
+  function preencherTeste(i, q, resp) {
+    const f = $('t-form');
+    if (!q.opcoes) { f.elements['q' + i].value = resp; return true; }
+    const quer = resp.split(' | ').map(norm).filter(Boolean);
+    let achou = false;
+    if (q.select) {
+      const s = f.elements['q' + i]; const o = q.opcoes.find(x => quer.includes(norm(x)));
+      s.value = o || ''; return !!o;
+    }
+    f.querySelectorAll('input[name=q' + i + ']').forEach(inp => { inp.checked = quer.includes(norm(inp.value)); achou ||= inp.checked; });
+    return achou;
+  }
+  // o histórico "modelo: resposta" de cada pergunta fica entre um modelo e outro para comparar; só o Limpar zera
+  function limparCampos() {
+    if (testeAbort) testeAbort.abort();
+    $('t-form').reset();
+    $('t-form').querySelectorAll('.nota').forEach(n => { n.textContent = ''; n.classList.remove('erro'); });
+    $('t-status').textContent = ''; $('t-status').classList.remove('erro');
+  }
+  function limparTeste() {
+    limparCampos();
+    $('t-form').querySelectorAll('.t-q ul').forEach(u => u.textContent = '');
+  }
+  async function responderTeste(modelo) {
+    limparCampos();
+    const ctl = testeAbort = new AbortController();
+    const botoes = $('t-modelos').querySelectorAll('button');
+    botoes.forEach(b => b.disabled = true);
+    const blocos = $('t-form').querySelectorAll('.t-q');
+    let parado = false;
+    for (let i = 0; i < PERGUNTAS.length && !ctl.signal.aborted; i++) {
+      const q = PERGUNTAS[i]; const nota = blocos[i].querySelector('.nota');
+      $('t-status').textContent = modelo + ': ' + (i + 1) + '/' + PERGUNTAS.length + '…';
+      // modelo free pode levar 2,5 min num texto longo: o contador mostra que não travou
+      const t0 = Date.now();
+      const tique = () => { nota.textContent = 'gerando… ' + Math.round((Date.now() - t0) / 1000) + 's'; };
+      tique(); const relogio = setInterval(tique, 1000);
+      try {
+        let r;
+        try {
+          r = await fetch('/api/teste-ia/responder', { method: 'POST', signal: ctl.signal, headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pergunta: q.p, tipo: q.tipo, opcoes: q.opcoes || [], vaga: $('t-vaga').value, modelo }) });
+        } catch (e) {
+          if (ctl.signal.aborted) throw e;
+          throw Object.assign(new Error('o SearchJob não respondeu (servidor fora do ar ou reiniciando) — tente de novo em instantes'), { parar: true });
+        }
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw Object.assign(new Error(j.erro || ('HTTP ' + r.status)), { parar: !!j.esgotado });
+        const casou = preencherTeste(i, q, j.resposta);
+        nota.textContent = j.caminho + ' · ' + (j.ms / 1000).toFixed(1) + 's' + (j.motivo ? ' · ' + j.motivo : '')
+          + (q.opcoes && j.resposta && !casou ? ' · não casou com nenhuma opção' : '');
+        nota.classList.toggle('erro', !j.resposta || (q.opcoes && !casou));
+        const li = document.createElement('li'); const b = document.createElement('b'); b.textContent = modelo + ': ';
+        li.append(b, j.resposta || '(sem resposta)'); blocos[i].querySelector('ul').appendChild(li);
+      } catch (e) {
+        if (ctl.signal.aborted) { nota.textContent = ''; break; }
+        nota.textContent = 'erro: ' + e.message; nota.classList.add('erro');
+        if (e.parar) { // provedor esgotado ou servidor fora: as próximas perguntas falhariam igual
+          parado = true;
+          $('t-status').textContent = '⚠️ ' + e.message; $('t-status').classList.add('erro');
+          break;
+        }
+      } finally {
+        clearInterval(relogio);
+      }
+    }
+    if (!ctl.signal.aborted && !parado) $('t-status').textContent = modelo + ': pronto';
+    botoes.forEach(b => b.disabled = false);
+  }
+  $('b-teste').onclick = async () => {
+    if (!$('t-form').children.length) montarTeste();
+    $('teste').hidden = false;
+    const box = $('t-modelos'); box.textContent = 'carregando modelos…';
+    try {
+      const ms = await (await fetch('/api/teste-ia/modelos')).json();
+      box.textContent = ms.length ? '' : 'Nenhum modelo configurado (cadastre a chave de um provedor em Portais e IA).';
+      ms.forEach(m => { const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Responder com ' + m; b.onclick = () => responderTeste(m); box.appendChild(b); });
+    } catch (e) { box.textContent = 'Falha ao listar os modelos: ' + e; }
+  };
+  $('t-limpar').onclick = limparTeste;
+  $('t-fechar').onclick = () => { limparTeste(); $('teste').hidden = true; };
 </script>
 </body>
 </html>

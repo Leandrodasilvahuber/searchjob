@@ -35,7 +35,7 @@ public class CredencialRepo {
      */
     @Transactional
     public void salvar(String portal, String usuario, String senha) {
-        String p = portal.trim().toLowerCase();
+        String p = chave(portal);
         String u = usuario.trim();
         boolean existe = jdbc.sql("SELECT COUNT(*) FROM credencial WHERE portal = ? AND usuario = ?")
                 .param(p).param(u).query(Integer.class).single() > 0;
@@ -70,11 +70,16 @@ public class CredencialRepo {
                 + "(SELECT MIN(id) FROM credencial WHERE portal = ?)").param(p).update());
     }
 
-    /** Login ativo do portal (o nome do portal não diferencia maiúsculas). */
+    /** Login ativo do portal (o nome do portal não diferencia maiúsculas nem acentos). */
     public Optional<Login> ativa(String portal) {
         return jdbc.sql("SELECT usuario, senha_cifrada FROM credencial WHERE portal = ? AND ativa = 1")
-                .param(portal.trim().toLowerCase())
+                .param(chave(portal))
                 .query((rs, i) -> new String[] {rs.getString(1), rs.getString(2)}).optional()
                 .map(l -> new Login(l[0], cofre.decifrar(l[1])));
+    }
+
+    /** O robô chama o portal pelo nome de exibição ("Sólides") e a tela de credenciais pela chave ("solides"). */
+    private static String chave(String portal) {
+        return PortalRepo.chave(portal);
     }
 }
