@@ -48,6 +48,21 @@ public class IaClient {
         return repo.todos().stream().filter(Provedor::utilizavel).toList();
     }
 
+    /** Quando cada provedor estourou o prazo pela última vez. */
+    private final Map<String, Long> estourou = new java.util.concurrent.ConcurrentHashMap<>();
+    static final long CASTIGO_MS = 10 * 60_000L;
+
+    /**
+     * Provedores na ordem de Portais e IA, mas quem estourou o prazo nos últimos 10 min vai para o fim: o free pendurado
+     * custava 90 s em cada chamada antes do próximo responder em segundos.
+     */
+    private List<Provedor> naOrdemDeUso() {
+        long agora = System.currentTimeMillis();
+        return provedores().stream()
+                .sorted(java.util.Comparator.comparing(p -> agora - estourou.getOrDefault(p.nome(), 0L) < CASTIGO_MS))
+                .toList();
+    }
+
     public boolean configurado() {
         return !provedores().isEmpty();
     }
@@ -68,7 +83,7 @@ public class IaClient {
     public String conversar(String system, String user) {
         TesteFullLog.ativar(kv.booleano(KvRepo.CONFIG, "relatorio_desktop", false));
         IllegalStateException ultima = null;
-        for (Provedor p : provedores()) {
+        for (Provedor p : naOrdemDeUso()) {
             for (String m : p.modelos()) {
                 try {
                     String r = chamarModelo(p, m, system, user, true);
@@ -112,12 +127,14 @@ public class IaClient {
         synchronized (travas.computeIfAbsent(p.nome(), k -> new Object())) {
             long intervalo = p.intervaloMs();
             int tentativas = Math.max(1, p.tentativas());
+            // prazo total no provedor: 10 tentativas de 180 s seguravam a vaga meia hora antes de cair para o próximo
+            long fim = System.currentTimeMillis() + PRAZO_TOTAL_S * 1000L;
             for (int tentativa = 1; ; tentativa++) {
                 dormir(ultimaChamada.getOrDefault(p.nome(), 0L) + intervalo - System.currentTimeMillis());
                 try {
-                    return enviar(p, modelo, system, user);
+                    return enviar(p, modelo, system, user, Math.max(1, (fim - System.currentTimeMillis()) / 1000));
                 } catch (IllegalStateException e) {
-                    if (tentativa >= tentativas || Thread.currentThread().isInterrupted()) throw e;
+                    if (tentativa >= tentativas || System.currentTimeMillis() >= fim || Thread.currentThread().isInterrupted()) throw e;
                     if (e instanceof LimiteExcedido l && (l.diario || !insistirNo429)) throw e;
                     TesteFullLog.falha(modelo, "tentativa " + tentativa + "/" + tentativas + ": " + e.getMessage()); // TEMP-TESTE-FULL
                     if (e instanceof LimiteExcedido l) dormir(l.esperaMs > 0 ? l.esperaMs : 5000L * tentativa);
@@ -127,6 +144,13 @@ public class IaClient {
             }
         }
     }
+
+    /**
+     * Tempo máximo somando as tentativas num provedor antes de passar ao próximo; vale também como teto do timeout de
+     * cada chamada. O free do OpenRouter que não responde em 90 s costuma ficar pendurado até o fim, e o próximo
+     * provedor responde em segundos.
+     */
+    static final long PRAZO_TOTAL_S = 90;
 
     private static void dormir(long ms) {
         if (ms <= 0) return;
@@ -171,7 +195,8 @@ public class IaClient {
         }
     }
 
-    private String enviar(Provedor p, String modelo, String system, String user) {
+    /** {@code restanteS}: o que sobra do prazo total no provedor; a chamada não passa disso nem do timeout dele. */
+    private String enviar(Provedor p, String modelo, String system, String user, long restanteS) {
         try {
             Map<String, Object> pedido = new java.util.LinkedHashMap<>(Map.of(
                     "model", modelo,
@@ -181,7 +206,7 @@ public class IaClient {
             // o raciocínio do GLM dobra o tempo de resposta e não melhora textos curtos de formulário
             if ((p.nome() + " " + p.url()).toLowerCase().contains("z.ai")) pedido.put("thinking", Map.of("type", "disabled"));
             String corpo = JSON.writeValueAsString(pedido);
-            long prazo = Math.max(1, p.timeoutS());
+            long prazo = Math.max(1, Math.min(p.timeoutS(), restanteS));
             HttpRequest req = HttpRequest.newBuilder(URI.create(p.url()))
                     .timeout(Duration.ofSeconds(prazo))
                     .header("Authorization", "Bearer " + p.chave())
@@ -195,6 +220,7 @@ public class IaClient {
                 resp = futuro.get(prazo, java.util.concurrent.TimeUnit.SECONDS);
             } catch (java.util.concurrent.TimeoutException e) {
                 futuro.cancel(true);
+                estourou.put(p.nome(), System.currentTimeMillis());
                 throw new IllegalStateException(p.nome() + " " + modelo + " não respondeu em " + prazo + "s");
             } catch (InterruptedException e) {
                 futuro.cancel(true);
@@ -207,7 +233,9 @@ public class IaClient {
             if (resp.statusCode() / 100 != 2)
                 throw new IllegalStateException(p.nome() + " " + modelo + " HTTP " + resp.statusCode() + ": "
                         + resp.body().substring(0, Math.min(300, resp.body().length())));
-            String txt = JSON.readTree(resp.body()).path("choices").path(0).path("message").path("content").asText();
+            // modelo que só "pensa" devolve content null: asText() daria o texto "null" e passaria como resposta
+            JsonNode conteudo = JSON.readTree(resp.body()).path("choices").path(0).path("message").path("content");
+            String txt = conteudo.isTextual() ? conteudo.asText() : "";
             if (txt.isBlank()) throw new IllegalStateException(p.nome() + " " + modelo + " devolveu resposta vazia");
             return txt;
         } catch (IllegalStateException e) {
@@ -233,7 +261,13 @@ public class IaClient {
 
     /** Pede JSON e extrai o primeiro objeto {...} da resposta. */
     public JsonNode conversarJson(String system, String user) {
-        return extrairJson(conversar(system, user));
+        try {
+            return extrairJson(conversar(system, user));
+        } catch (IaIndisponivel e) {
+            throw e;
+        } catch (IllegalStateException e) { // resposta sem JSON válido: os modelos free erram às vezes, uma nova chamada costuma vir certa
+            return extrairJson(conversar(system, user));
+        }
     }
 
     static JsonNode extrairJson(String txt) {

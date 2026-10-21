@@ -204,6 +204,7 @@ final class Radios {
             Thread.sleep(800);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            throw new SessaoParada();
         }
     }
 

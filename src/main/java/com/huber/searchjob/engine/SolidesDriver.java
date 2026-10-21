@@ -46,6 +46,8 @@ public class SolidesDriver extends PortalWebDriver {
     private final List<String> base;
     private final int recenciaDias;
     private boolean viuCurriculo;
+    /** Vaga atual com candidatura só no site de outro sistema de RH (ver {@link #siteExterno}). */
+    private boolean externa;
     private int vagasDesdeLimpeza = VAGAS_POR_LIMPEZA; // limpa antes da primeira vaga da sessão
 
     public SolidesDriver(NavegadorFirefox navegador, SituacaoService situacoes) {
@@ -62,6 +64,8 @@ public class SolidesDriver extends PortalWebDriver {
     @Override
     public Desfecho candidatar(Vaga vaga, Cv cv, boolean dryRun, BooleanSupplier continuar) {
         viuCurriculo = false;
+        externa = !vaga.url().startsWith("https://vagas.solides.com.br/");
+        if (externa) return super.candidatar(vaga, cv, dryRun, continuar); // não passa pelo perfil da Sólides
         int antes = vagasDesdeLimpeza >= VAGAS_POR_LIMPEZA ? limpar() : -1;
         Desfecho r = super.candidatar(vaga, cv, dryRun, continuar);
         // pendência: o Orquestrador chama de novo para a mesma vaga e compara o motivo, então não conta nem anexa
@@ -176,10 +180,23 @@ public class SolidesDriver extends PortalWebDriver {
             for (String campo : new String[] {"hardSkills", "seniority", "recruitmentContractType", "language"})
                 for (JsonNode n : v.path(campo)) desc.append(' ').append(n.path("name").asText(""));
             for (JsonNode q : v.path("killerQuestions")) desc.append(' ').append(q.path("question").asText(""));
+            String site = siteExterno(v);
             out.add(new Vaga("Sólides", id, v.path("companyName").asText(""), v.path("title").asText("").trim(),
-                    "https://vagas.solides.com.br/vaga/" + id, local, v.path("jobType").asText(""), pub, desc.toString().trim()));
+                    site != null ? site : "https://vagas.solides.com.br/vaga/" + id, local, v.path("jobType").asText(""), pub, desc.toString().trim()));
         }
         return out;
+    }
+
+    /**
+     * Vaga publicada por outro sistema de RH (ex.: publishers.rhgestor.redirectUrl): a página dela na Sólides dá 404 e a
+     * candidatura é só no site desse sistema; null quando a candidatura é pela Sólides.
+     */
+    static String siteExterno(JsonNode vaga) {
+        for (JsonNode p : vaga.path("publishers")) {
+            String url = p.path("redirectUrl").asText("");
+            if (url.startsWith("http")) return url;
+        }
+        return null;
     }
 
     /**
@@ -223,6 +240,7 @@ public class SolidesDriver extends PortalWebDriver {
 
     @Override
     protected Optional<Desfecho> casoEspecial(WebDriver d, String corpo) {
+        if (externa) return Optional.of(new Desfecho(Status.PULADA, MOTIVO_EXTERNA + ": site da empresa"));
         if (String.valueOf(d.getCurrentUrl()).contains("/profiler") || corpo.contains("conclua o profiler"))
             return Optional.of(new Desfecho(Status.PRECISA_USUARIO, "Profiler pendente na Sólides: responda o teste comportamental"));
         // "Continuar" no aviso seria declarar que atende aos requisitos afirmativos: o robô não afirma isso pelo candidato.

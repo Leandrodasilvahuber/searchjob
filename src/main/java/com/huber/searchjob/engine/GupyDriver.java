@@ -59,6 +59,11 @@ public class GupyDriver implements PortalDriver {
     }
 
     @Override
+    public boolean telaDeLoginAberta() {
+        return LoginAutomatico.telaDeLogin(navegador.driver());
+    }
+
+    @Override
     public boolean entrarComGoogle(String email) {
         return LoginAutomatico.entrarComGoogle(navegador.driver(), email);
     }
@@ -235,6 +240,9 @@ public class GupyDriver implements PortalDriver {
             if (corpo.contains("Candidatura finalizada")) return new Desfecho(Status.ENVIADA, "Candidatura finalizada");
             if (jaCandidatou(corpo)) return new Desfecho(Status.PULADA, "já candidatada nesta conta");
             if (url.contains("/reproved")) return reprovada(corpo);
+            // 404 da Gupy ("Ops! Não encontramos a página"): a vaga foi removida/encerrada depois de anunciada
+            if (url.contains("/not-found") || corpo.contains("Não encontramos a página"))
+                return new Desfecho(Status.PULADA, "vaga encerrada (a Gupy não encontrou a página da vaga)");
             if (paginaDeLogin(d, url))
                 return new Desfecho(Status.PRECISA_USUARIO, "login necessário no Gupy");
             if (corpo.toLowerCase().contains("captcha") || corpo.contains("verificação de segurança"))
@@ -252,6 +260,9 @@ public class GupyDriver implements PortalDriver {
                 }
             }
             if (botao == null && d.getCurrentUrl().contains("/reproved")) return reprovada(texto(d));
+            // o redirect para o 404 pode chegar só depois da primeira checagem
+            if (botao == null && (d.getCurrentUrl().contains("/not-found") || texto(d).contains("Não encontramos a página")))
+                return new Desfecho(Status.PULADA, "vaga encerrada (a Gupy não encontrou a página da vaga)");
             if (botao == null) return new Desfecho(Status.ERRO, "nenhum botão de avanço encontrado (passo " + passo + ") · " + diagnosticoPagina(d));
             if (botao.getText().trim().equals("Finalizar candidatura") && dryRun)
                 return new Desfecho(Status.PRONTA_DRY_RUN, "dry-run: formulário completo, não enviado");
@@ -373,6 +384,7 @@ public class GupyDriver implements PortalDriver {
             Thread.sleep(ms);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            throw new SessaoParada();
         }
     }
 

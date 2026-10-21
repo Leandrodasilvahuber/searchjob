@@ -16,7 +16,8 @@ class SolidesDriverTest {
             + "\"state\":{\"code\":\"RS\"},\"city\":{\"name\":\"Porto Alegre\"},\"jobType\":\"remoto\",\"createdAt\":\"2026-10-19\","
             + "\"hardSkills\":[{\"name\":\"Laravel\"}]},"
             + "{\"killerQuestions\":[],\"id\":\"bCFX46fqia\",\"title\":\"Analista\",\"description\":\"<p>curta</p>\",\"companyName\":\"X\","
-            + "\"state\":null,\"city\":null,\"jobType\":\"presencial\",\"createdAt\":null}],\"totalPages\":3}]\n"
+            + "\"state\":null,\"city\":null,\"jobType\":\"presencial\",\"createdAt\":null,"
+            + "\"publishers\":{\"rhgestor\":{\"externalId\":\"Zj0U\",\"redirectUrl\":\"https://gam.rhgestor.com.br/vagas/detalhes/Zj0U\"}}}],\"totalPages\":3}]\n"
             + "1e:Tb,<p>Olá</p>2f:[\"$\",\"p\"]";
 
     @Test
@@ -35,6 +36,7 @@ class SolidesDriverTest {
         assertTrue(a.descricao().contains("pretensão salarial"));
         Vaga b = v.get(1);
         assertEquals("curta", b.descricao());
+        assertEquals("https://gam.rhgestor.com.br/vagas/detalhes/Zj0U", b.url()); // candidatura só no site do rhgestor
         assertEquals("", b.local());
         assertNull(b.publicada());
     }

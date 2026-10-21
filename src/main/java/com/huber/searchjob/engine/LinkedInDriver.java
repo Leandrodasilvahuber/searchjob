@@ -44,7 +44,7 @@ public class LinkedInDriver extends PortalWebDriver {
                 String html;
                 try {
                     html = get("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords="
-                            + URLEncoder.encode(termo, StandardCharsets.UTF_8) + "&geoId=106057199&f_AL=true&f_TPR=r" + segundos
+                            + URLEncoder.encode(termo, StandardCharsets.UTF_8) + "&geoId=106057199" + filtroBusca() + "&f_TPR=r" + segundos
                             + "&sortBy=DD&start=" + inicio);
                 } catch (Exception e) {
                     if (out.isEmpty()) throw e;
@@ -57,6 +57,11 @@ public class LinkedInDriver extends PortalWebDriver {
         }
         out.sort(Vaga.MAIS_RECENTE);
         return out.size() > max ? new ArrayList<>(out.subList(0, max)) : out;
+    }
+
+    /** Filtro de candidatura da busca pública: só Candidatura simplificada (f_AL); o Full search tira o filtro. */
+    protected String filtroBusca() {
+        return "&f_AL=true";
     }
 
     static List<Vaga> parse(String html, int max) {

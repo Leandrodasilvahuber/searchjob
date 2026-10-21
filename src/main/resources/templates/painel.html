@@ -39,6 +39,8 @@
     </div>
     <div class="row">
       <form id="f-iniciar" th:action="@{/iniciar}" method="post" th:hidden="${estado.rodando}" onsubmit="return iaOk()"><button>▶ Iniciar busca</button></form>
+      <form id="f-full" th:action="@{/iniciar-full}" method="post" th:hidden="${estado.rodando}" onsubmit="return iaOk()"
+            title="Todos os portais, incluindo as vagas com candidatura no site da empresa: a IA preenche até o fim e cria conta quando o site pede"><button>▶ Full search</button></form>
       <form id="f-parar" th:action="@{/parar}" method="post" th:hidden="${!estado.rodando}"><button class="del">■ Parar</button></form>
       <button type="button" id="b-teste" class="sec">🧪 Testar textos</button>
       <span class="tag" id="estado" th:text="${estado.rodando} ? 'rodando' : 'parado'">parado</span>
@@ -259,6 +261,7 @@
       const e = r.estado;
       $('estado').textContent = e.rodando ? 'rodando' : 'parado';
       $('f-iniciar').hidden = e.rodando;
+      $('f-full').hidden = e.rodando;
       $('f-parar').hidden = !e.rodando;
       $('msg').textContent = e.mensagem;
       $('hero').classList.toggle('on', e.rodando);

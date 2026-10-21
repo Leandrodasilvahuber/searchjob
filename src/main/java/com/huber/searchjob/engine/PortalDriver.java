@@ -51,6 +51,11 @@ public interface PortalDriver {
         return false;
     }
 
+    /** True se a aba aberta é uma tela de login (do portal, LinkedIn ou Google). Portal sem navegador: true (nada a abrir). */
+    default boolean telaDeLoginAberta() {
+        return true;
+    }
+
     /** True se a página aberta no navegador mostra CAPTCHA (o login automático não adianta). */
     default boolean pedeCaptcha() {
         return false;
@@ -75,6 +80,9 @@ public interface PortalDriver {
     default Vaga detalhar(Vaga v) {
         return v;
     }
+
+    /** Recebe o log da sessão, para o driver contar o que está fazendo (ex.: os passos no site da empresa). */
+    default void observar(java.util.function.Consumer<String> log) {}
 
     /** Libera recursos (navegador). */
     default void fechar() {}

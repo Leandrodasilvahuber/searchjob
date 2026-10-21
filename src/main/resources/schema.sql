@@ -78,3 +78,16 @@ CREATE TABLE IF NOT EXISTS ia_modelo_prompt (
   modelo TEXT PRIMARY KEY,
   prompt TEXT NOT NULL DEFAULT ''
 );
+-- contas que o robô criou em sites de empresas e portais (vagas externas do Full search): reaproveitadas na próxima vaga do mesmo site
+CREATE TABLE IF NOT EXISTS cadastro (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  empresa TEXT,
+  dominio TEXT NOT NULL,
+  link TEXT,
+  login TEXT NOT NULL,
+  senha_cifrada TEXT NOT NULL DEFAULT '',
+  metodo TEXT NOT NULL DEFAULT 'senha',
+  vaga TEXT,
+  criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cadastro_dominio ON cadastro(dominio);

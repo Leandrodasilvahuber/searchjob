@@ -1,5 +1,6 @@
 package com.huber.searchjob.engine;
 
+import com.huber.searchjob.db.CadastroRepo;
 import com.huber.searchjob.db.KvRepo;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
@@ -9,10 +10,29 @@ import org.springframework.stereotype.Component;
 public class FabricaDrivers {
     private final SituacaoService situacoes;
     private final KvRepo kv;
+    private final IaClient ia;
+    private final CadastroRepo cadastros;
+    private final CvContexto cvContexto;
 
-    public FabricaDrivers(SituacaoService situacoes, KvRepo kv) {
+    public FabricaDrivers(SituacaoService situacoes, KvRepo kv, IaClient ia, CadastroRepo cadastros, CvContexto cvContexto) {
         this.situacoes = situacoes;
         this.kv = kv;
+        this.ia = ia;
+        this.cadastros = cadastros;
+        this.cvContexto = cvContexto;
+    }
+
+    /**
+     * Full search: o driver do portal com as vagas externas (site da empresa) conduzidas pela IA em vez de puladas; no
+     * LinkedIn, a busca inclui as vagas sem Candidatura simplificada.
+     */
+    public Optional<PortalDriver> criarFull(String portal, NavegadorFirefox navegador) {
+        Optional<PortalDriver> d = "linkedin".equals(portal.trim().toLowerCase())
+                ? Optional.of(new LinkedInFullDriver(navegador, situacoes)) : criar(portal, navegador);
+        d.ifPresent(x -> {
+            if (x instanceof PortalWebDriver w) w.usarAgenteExterno(new AgenteExterno(ia, cadastros, cvContexto, kv));
+        });
+        return d;
     }
 
     /** Vazio se o portal não é suportado. */

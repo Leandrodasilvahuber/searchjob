@@ -120,6 +120,11 @@ public abstract class PortalWebDriver implements PortalDriver {
     }
 
     @Override
+    public boolean telaDeLoginAberta() {
+        return paginaLogin() == null || LoginAutomatico.telaDeLogin(navegador.driver());
+    }
+
+    @Override
     public boolean entrarComGoogle(String email) {
         return LoginAutomatico.entrarComGoogle(navegador.driver(), email);
     }
@@ -156,16 +161,98 @@ public abstract class PortalWebDriver implements PortalDriver {
         return LoginAutomatico.entrar(navegador.driver(), usuario, senha);
     }
 
+    /** Full search: a vaga com candidatura no site da empresa vai para a IA em vez de ser pulada; null = pula. */
+    private AgenteExterno externo;
+    /** Vaga cujo site da empresa está aberto: depois de um chamado ao usuário a candidatura continua nessa aba. */
+    private String vagaNoSite;
+    private String abaDoSite;
+
+    /** Liga o Full search neste portal. */
+    public void usarAgenteExterno(AgenteExterno agente) {
+        this.externo = agente;
+    }
+
+    @Override
+    public void observar(java.util.function.Consumer<String> log) {
+        if (externo != null) externo.observar(log);
+    }
+
+    static final String MOTIVO_EXTERNA = "vaga externa (candidatura fora do portal)";
+
     @Override
     public Desfecho candidatar(Vaga vaga, Cv cv, boolean dryRun, BooleanSupplier continuar) {
+        WebDriver d = navegador.driver();
+        if (externo != null && vaga.url().equals(vagaNoSite) && abaDoSite != null && d.getWindowHandles().contains(abaDoSite)) {
+            d.switchTo().window(abaDoSite); // retomando depois de um chamado: segue no site da empresa
+            return noSiteDaEmpresa(d, vaga, cv, dryRun, continuar, false);
+        }
+        vagaNoSite = null;
+        Desfecho r;
         try {
-            return fluxo(vaga, cv, dryRun, continuar);
+            r = fluxo(vaga, cv, dryRun, continuar);
         } catch (org.openqa.selenium.UnhandledAlertException e) {
             // ex.: "você será redirecionado ao sistema de seleção da empresa": vaga externa, não candidata por aqui
             String aviso = e.getAlertText() == null ? "" : e.getAlertText().strip();
-            return new Desfecho(Status.PULADA, "vaga externa (candidatura fora do portal)"
+            r = new Desfecho(Status.PULADA, MOTIVO_EXTERNA
                     + (aviso.isEmpty() ? "" : ": " + (aviso.length() > 120 ? aviso.substring(0, 120) : aviso)));
         }
+        if (externo == null || r.status() != Status.PULADA || !r.motivo().startsWith("vaga externa")) return r;
+        return noSiteDaEmpresa(d, vaga, cv, dryRun, continuar, true);
+    }
+
+    /**
+     * Candidatura no site da empresa conduzida pela IA, a partir da página aberta (a vaga no portal, com o botão que leva
+     * ao site, ou o próprio site). {@code nova}: começa do zero (esquece os passos de outra vaga).
+     */
+    protected Desfecho noSiteDaEmpresa(WebDriver d, Vaga vaga, Cv cv, boolean dryRun, BooleanSupplier continuar, boolean nova) {
+        String site = d.getCurrentUrl();
+        if (nova && com.huber.searchjob.db.CadastroRepo.dominio(site).endsWith("gupy.io")) {
+            // o site da empresa é uma vaga da Gupy: o driver dela já conhece o formulário (a IA genérica se perde nas máscaras)
+            Vaga naGupy = new Vaga(vaga.portal(), vaga.id(), vaga.empresa(), vaga.cargo(), site, vaga.local(),
+                    vaga.modalidade(), vaga.publicada(), vaga.descricao());
+            GupyDriver gupy = new GupyDriver(navegador, situacoes);
+            Desfecho r = gupy.candidatar(naGupy, cv, dryRun, continuar);
+            if (r.status() == Status.PRECISA_USUARIO && r.motivo().contains("login")) {
+                // a sessão da Gupy caiu: entra pelo Google como no início da sessão e tenta de novo, uma vez
+                if (gupy.abrirFormularioLogin() && gupy.entrarComGoogle(externo.email()) && Boolean.TRUE.equals(gupy.logado()))
+                    r = gupy.candidatar(naGupy, cv, dryRun, continuar);
+                // ainda sem login: é a conta da Gupy, não a deste portal (o Orquestrador tentaria entrar no portal errado)
+                if (r.status() == Status.PRECISA_USUARIO && r.motivo().contains("login"))
+                    return new Desfecho(r.status(), AgenteExterno.motivo("a Gupy pediu login (" + r.motivo()
+                            + "): entre na Gupy no Firefox e clique em Resolvido"));
+            }
+            return new Desfecho(r.status(), "Gupy: " + r.motivo());
+        }
+        if (nova) {
+            externo.reiniciar();
+            vagaNoSite = vaga.url();
+        }
+        for (int alerta = 0; ; alerta++) {
+            try {
+                Desfecho r = externo.candidatar(d, vaga, cv, dryRun, continuar);
+                abaDoSite = d.getWindowHandle();
+                return r;
+            } catch (org.openqa.selenium.UnhandledAlertException e) {
+                // alert() do site ("deseja sair?", "dados salvos"): aceita e segue de onde parou
+                try {
+                    d.switchTo().alert().accept();
+                } catch (org.openqa.selenium.WebDriverException ignorado) {
+                    // o alert já foi fechado
+                }
+                if (alerta >= 3) return new Desfecho(Status.PRECISA_USUARIO, AgenteExterno.motivo(
+                        "o site abre avisos seguidos (" + e.getAlertText() + "): resolva no Firefox e clique em Resolvido"));
+            }
+        }
+    }
+
+    /** Deixa só a primeira aba (a do site da vaga anterior fica aberta depois de enviar). */
+    protected static void fecharAbasExtras(WebDriver d) {
+        List<String> abas = new ArrayList<>(d.getWindowHandles());
+        for (int i = 1; i < abas.size(); i++) {
+            d.switchTo().window(abas.get(i));
+            d.close();
+        }
+        d.switchTo().window(abas.get(0));
     }
 
     /** Formulário de candidatura (janela aberta) escrito em inglês: a vaga é de empresa estrangeira, não se candidata. */
@@ -197,6 +284,7 @@ public abstract class PortalWebDriver implements PortalDriver {
     private Desfecho fluxo(Vaga vaga, Cv cv, boolean dryRun, BooleanSupplier continuar) {
         WebDriver d = navegador.driver();
         perguntasDaVaga.clear();
+        if (externo != null) fecharAbasExtras(d);
         abrir(d, vaga.url());
         String contexto = vaga.empresa() + " — " + vaga.cargo() + "\n" + vaga.descricao();
         String anterior = null;
@@ -601,7 +689,7 @@ public abstract class PortalWebDriver implements PortalDriver {
     }
 
     /** Textos dos botões/links de ação visíveis, para diagnosticar uma página que o robô não entendeu. */
-    private static String botoesVisiveis(WebDriver d) {
+    static String botoesVisiveis(WebDriver d) {
         List<String> out = new ArrayList<>();
         for (WebElement b : d.findElements(By.cssSelector("button,a.btn,input[type=submit],[role=button]"))) {
             try {
@@ -662,6 +750,7 @@ public abstract class PortalWebDriver implements PortalDriver {
             Thread.sleep(ms);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            throw new SessaoParada();
         }
     }
 

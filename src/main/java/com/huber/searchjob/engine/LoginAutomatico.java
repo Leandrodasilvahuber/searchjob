@@ -173,6 +173,23 @@ public final class LoginAutomatico {
     }
 
     /**
+     * True se a aba aberta é uma tela de login (campo de senha visível, ou página de login/autorização do LinkedIn,
+     * Google ou do portal): é o que precisa estar na frente do usuário quando ele é chamado para entrar.
+     */
+    public static boolean telaDeLogin(WebDriver d) {
+        try {
+            String url = String.valueOf(d.getCurrentUrl()).toLowerCase(java.util.Locale.ROOT);
+            if (url.matches(".*(linkedin\\.com/(login|uas|oauth|checkpoint)|accounts\\.google\\.com|/signin|/sign-in|/login|/entrar).*"))
+                return true;
+            for (WebElement e : d.findElements(By.cssSelector("input[type=password]")))
+                if (e.isDisplayed()) return true;
+            return false;
+        } catch (org.openqa.selenium.WebDriverException e) {
+            return false;
+        }
+    }
+
+    /**
      * Abre a tela de login do portal e, se ela oferece "Entrar com LinkedIn", clica nisso (a sessão do LinkedIn costuma
      * estar ativa no Firefox do robô, então às vezes já entra direto). Devolve true se foi pelo LinkedIn.
      */
@@ -323,6 +340,7 @@ public final class LoginAutomatico {
             Thread.sleep(ms);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            throw new SessaoParada();
         }
     }
 }

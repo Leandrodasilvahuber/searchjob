@@ -30,6 +30,8 @@ public class NavegadorFirefox {
                 String binario = binarioFirefox();
                 if (binario != null) o.setBinary(binario);
                 o.addArguments("-profile", perfil.toString());
+                // sites multilíngues (InHire, Greenhouse) abrem em inglês sem isto e a IA pula achando que a vaga é em inglês
+                o.addPreference("intl.accept_languages", "pt-BR, pt, en-US, en");
                 if (Boolean.getBoolean("searchjob.headless")) o.addArguments("-headless");
                 o.setPageLoadTimeout(java.time.Duration.ofSeconds(60));
                 o.setScriptTimeout(java.time.Duration.ofSeconds(30));

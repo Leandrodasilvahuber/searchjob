@@ -1,0 +1,42 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org" lang="pt-BR">
+<head th:replace="~{layout :: head('Cadastros')}"></head>
+<body>
+<nav th:replace="~{layout :: menu(${pagina})}"></nav>
+<main>
+  <h1>Cadastros em sites</h1>
+  <p class="mut lead">Contas que o robô criou nos sites das empresas no ▶ Full search. A próxima vaga no mesmo
+    site entra com a conta daqui em vez de criar outra. A senha fica cifrada no banco.</p>
+  <div class="card" style="overflow-x:auto">
+    <p class="mut" th:if="${itens.isEmpty()}">Nenhuma conta criada ainda.</p>
+    <table th:unless="${itens.isEmpty()}">
+      <tr><th>Data</th><th>Empresa</th><th>Site</th><th>Login</th><th>Senha</th><th>Vaga</th><th></th></tr>
+      <tr th:each="c : ${itens}">
+        <td th:text="${c.criadoEm}"></td>
+        <td th:text="${c.empresa}"></td>
+        <td><a th:href="${c.link}" target="_blank" rel="noopener" th:text="${c.dominio}"></a></td>
+        <td th:text="${c.login}"></td>
+        <td>
+          <span th:if="${c.metodo != 'senha'}" class="tag" th:text="'entra com ' + ${c.metodo}"></span>
+          <span th:if="${c.metodo == 'senha'}">
+            <code class="senha" th:attr="data-id=${c.id}">••••••••</code>
+            <button type="button" class="sec mostrar" th:attr="data-id=${c.id}">mostrar</button>
+          </span>
+        </td>
+        <td th:text="${c.vaga}" style="max-width:320px"></td>
+        <td><form th:action="@{/cadastros/{id}/excluir(id=${c.id})}" method="post"><button class="del" onclick="return confirm('Excluir este cadastro? A conta continua existindo no site.')">×</button></form></td>
+      </tr>
+    </table>
+  </div>
+</main>
+<script>
+  document.querySelectorAll('.mostrar').forEach(b => b.addEventListener('click', async () => {
+    const el = document.querySelector('code.senha[data-id="' + b.dataset.id + '"]');
+    if (b.textContent === 'ocultar') { el.textContent = '••••••••'; b.textContent = 'mostrar'; return; }
+    const r = await (await fetch('/cadastros/' + b.dataset.id + '/senha', { method: 'POST' })).json();
+    el.textContent = r.senha || '(sem senha)';
+    b.textContent = 'ocultar';
+  }));
+</script>
+</body>
+</html>

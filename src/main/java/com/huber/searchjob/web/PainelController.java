@@ -67,6 +67,14 @@ public class PainelController {
         return "redirect:/";
     }
 
+    /** Full search: todos os portais, com as vagas do site da empresa conduzidas pela IA até o fim em vez de puladas. */
+    @PostMapping("/iniciar-full")
+    public String iniciarFull() {
+        if (!ia.configurado()) return "redirect:/?semIa";
+        orq.iniciar(true);
+        return "redirect:/";
+    }
+
     /** Resposta ao alerta de login/pendência: "continuar" (já logou/resolveu) ou "pular". */
     @PostMapping("/chamado/{decisao}")
     @ResponseBody

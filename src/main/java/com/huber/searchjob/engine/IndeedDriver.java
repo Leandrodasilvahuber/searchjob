@@ -108,7 +108,7 @@ public class IndeedDriver extends PortalWebDriver {
                 || corpo.contains("candidatura simplificada") || corpo.contains("indeed apply");
         boolean externa = corpo.contains("candidate se no site da empresa") || corpo.contains("candidatar se no site da empresa")
                 || corpo.contains("apply on company site");
-        if (externa && !simplificada) return Optional.of(new Desfecho(Status.PULADA, "candidatura externa (site da empresa)"));
+        if (externa && !simplificada) return Optional.of(new Desfecho(Status.PULADA, MOTIVO_EXTERNA + ": site da empresa"));
         return Optional.empty();
     }
 

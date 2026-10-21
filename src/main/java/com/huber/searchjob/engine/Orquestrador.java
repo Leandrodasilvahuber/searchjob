@@ -85,7 +85,9 @@ public class Orquestrador {
     public record Evento(String hora, String tipo, String texto, String detalhe) {}
 
     public synchronized Estado estado() {
-        return new Estado(rodando, mensagem, processadas.get(), enviadas.get(), puladas.get(), erros.get(),
+        // depois do Parar a thread ainda fecha o Firefox: segue "rodando" na tela (com o Parar) até terminar de fato
+        boolean ativo = rodando || thread != null && thread.isAlive();
+        return new Estado(ativo, mensagem, processadas.get(), enviadas.get(), puladas.get(), erros.get(),
                 new ArrayList<>(log), chamadoAtual(), alerta);
     }
 
@@ -165,7 +167,7 @@ public class Orquestrador {
     }
 
     private static boolean pedeLogin(String motivo) {
-        return motivo.contains("login") && !motivo.toLowerCase().contains("captcha");
+        return motivo.contains("login") && !motivo.toLowerCase().contains("captcha") && !externo(motivo);
     }
 
     /** Login ativo do portal salvo em Portais e IA. */
@@ -243,6 +245,21 @@ public class Orquestrador {
         boolean enviou = driver.entrarNaPaginaAberta(login.get().usuario(), login.get().senha());
         if (enviou) dormir(4000); // o LinkedIn devolve para o portal, que troca o código pela sessão
         return enviou;
+    }
+
+    /**
+     * Antes de chamar você para entrar: se a aba não está numa tela de login (o "Entrar com LinkedIn" redirecionou, a
+     * vaga parou em outra página), abre a do portal pelo LinkedIn e, se nem assim, o formulário e-mail/senha.
+     */
+    private void garantirTelaDeLogin(PortalDriver driver) {
+        try {
+            if (driver.telaDeLoginAberta()) return;
+            driver.abrirLogin();
+            if (!driver.telaDeLoginAberta()) driver.abrirFormularioLogin();
+            if (!driver.telaDeLoginAberta()) registrar(driver.nome() + ": não consegui deixar a tela de login aberta — " + driver.diagnostico());
+        } catch (RuntimeException e) {
+            registrar(driver.nome() + ": falha ao abrir a tela de login: " + e.getMessage());
+        }
     }
 
     /** Resultado do login automático: entrou, parou na confirmação do celular, ou passou pela tela do LinkedIn. */
@@ -332,12 +349,15 @@ public class Orquestrador {
         if (t.logado()) return;
         boolean celular = t.celular();
         boolean viaLinkedin = t.viaLinkedin();
-        if (!celular) driver.abrirLogin(); // a conferência saiu da tela de login: volta para ela antes de chamar você
+        if (!celular) {
+            driver.abrirLogin(); // a conferência saiu da tela de login: volta para ela antes de chamar você
+            garantirTelaDeLogin(driver);
+        }
         String motivo = celular
                 ? "o LinkedIn/Google mandou uma confirmação para o seu celular: aprove no celular e clique em Resolvido"
                 : driver.pedeCaptcha()
                 ? "o portal exige CAPTCHA: resolva e entre manualmente (marque \"lembrar-me\" para a sessão durar)"
-                : viaLinkedin ? "a tela do LinkedIn está aberta no Firefox: entre (ou autorize) e clique em Resolvido"
+                : viaLinkedin ? "a tela de login (LinkedIn ou do portal) está aberta no Firefox: entre (ou autorize) e clique em Resolvido"
                 : "a tela de login está aberta no Firefox; o login digitado será salvo para entrar sozinho nas próximas vezes";
         motivo = (logado == null ? "não consegui confirmar se está logado em " : "não logado em ") + driver.nome() + " — " + motivo;
         for (int vez = 1; ; vez++) {
@@ -375,10 +395,24 @@ public class Orquestrador {
     }
 
     private static boolean ehLogin(String motivo) {
-        return motivo.contains("login") || motivo.toLowerCase().contains("captcha");
+        return (motivo.contains("login") || motivo.toLowerCase().contains("captcha")) && !externo(motivo);
     }
 
+    /** Chamado do site da empresa (Full search): sempre ação manual no Firefox, mesmo falando de login ou CAPTCHA. */
+    private static boolean externo(String motivo) {
+        return motivo.startsWith("site externo:");
+    }
+
+    /** Sessão normal: todos os portais configurados, na ordem de Portais e IA. */
     public synchronized void iniciar() {
+        iniciar(false);
+    }
+
+    /**
+     * {@code full}: Full search — além do fluxo normal, as vagas com candidatura no site da empresa são conduzidas pela IA
+     * (criando conta quando o site pede) em vez de puladas; no LinkedIn entram também as vagas sem Candidatura simplificada.
+     */
+    public synchronized void iniciar(boolean full) {
         if (rodando) return;
         if (thread != null && thread.isAlive()) {
             registrar("a sessão anterior ainda está encerrando — aguarde alguns segundos");
@@ -392,7 +426,7 @@ public class Orquestrador {
         alerta = "";
         iaJaFalhou = false;
         log.clear();
-        thread = new Thread(this::executar, "searchjob-sessao");
+        thread = new Thread(() -> executar(full), "searchjob-sessao");
         thread.setDaemon(true);
         thread.start();
     }
@@ -428,7 +462,7 @@ public class Orquestrador {
         }
     }
 
-    private void executar() {
+    private void executar(boolean full) {
         NavegadorFirefox navegador = new NavegadorFirefox();
         List<PortalDriver> drivers = new ArrayList<>();
         try {
@@ -438,13 +472,15 @@ public class Orquestrador {
                     registrar(p.nome() + ": sem login configurado em Portais e IA — pulado");
                     continue;
                 }
-                Optional<PortalDriver> d = fabrica.criar(p.chave(), navegador);
+                Optional<PortalDriver> d = full ? fabrica.criarFull(p.chave(), navegador) : fabrica.criar(p.chave(), navegador);
                 if (d.isPresent()) drivers.add(d.get());
                 else registrar("portal \"" + p.nome() + "\" ainda não é suportado — ignorado");
             }
             boolean dryRun = Boolean.parseBoolean(kv.get(KvRepo.CONFIG, "dry_run", "true"));
             int max = kv.inteiro(KvRepo.CONFIG, "max_vagas", 30);
-            registrar("sessão iniciada" + (dryRun ? " · dry-run" : ""));
+            drivers.forEach(d -> d.observar(this::registrar));
+            registrar((full ? "Full search iniciado (vagas externas pela IA)" : "sessão iniciada")
+                    + (dryRun ? " · dry-run" : ""));
             encontradasTotal.set(0); // TEMP-TESTE-FULL
             jaNoHistorico.set(0); // TEMP-TESTE-FULL
             idInicial = candidaturas.listar("", "").stream().mapToLong(c -> c.id()).max().orElse(0); // TEMP-TESTE-FULL
@@ -466,6 +502,7 @@ public class Orquestrador {
                         } catch (Exception e) {
                             registrar("erro na busca (" + driver.nome() + "): " + e.getMessage());
                             if (e.getMessage() == null || !(e.getMessage().contains("CAPTCHA") || e.getMessage().contains("LOGIN necessário"))) break;
+                            if (e.getMessage().contains("LOGIN necessário")) garantirTelaDeLogin(driver);
                             if ("pular".equals(aguardar(new Chamado("LOGIN", driver.nome(), "busca", e.getMessage())))) {
                                 bloqueados.add(driver.nome());
                                 break;
@@ -632,6 +669,7 @@ public class Orquestrador {
                         ? " — o login automático não funcionou; entre manualmente (o novo login será salvo)"
                         : " — entre manualmente; o login digitado será salvo para entrar sozinho nas próximas vezes";
             }
+            if (login && !celularNoLogin && !captchaNoLogin) garantirTelaDeLogin(driver);
             String[] digitado = {null, null};
             Runnable capturar = login ? () -> acumular(digitado, driver.lerLogin()) : () -> { };
             String decisao = aguardar(new Chamado(tipo, driver.nome(), rotulo, motivo), capturar,
